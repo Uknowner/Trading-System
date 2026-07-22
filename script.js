@@ -1,5 +1,5 @@
 /* ============================================================
-   TRADING OS — script.js
+   TRADING OS — script.js  (enhanced: deposits, withdrawals, equity curve)
    Single-file vanilla JS. No frameworks. No libraries.
    All state lives in localStorage under the "tradingOS" key.
    ============================================================ */
@@ -8,7 +8,6 @@
 
 /* ============================================================
    SECTION 1 — DEFAULT CONFIGURATION
-   Everything the app ships with out of the box.
    ============================================================ */
 
 const DEFAULT_STRATEGY = [
@@ -107,31 +106,31 @@ const DEFAULT_SETTINGS = {
 
 /* ============================================================
    SECTION 2 — STATE / STORAGE
-   All data lives here. Persisted to localStorage.
    ============================================================ */
 
 const DB_KEY = 'tradingOS_v1';
 
 let state = {
-  strategy: DEFAULT_STRATEGY,
-  trades:   [],
-  settings: { ...DEFAULT_SETTINGS },
-  mistakes: [...DEFAULT_MISTAKES],
-  strengths:[...DEFAULT_STRENGTHS],
+  strategy:     DEFAULT_STRATEGY,
+  trades:       [],
+  transactions: [],   // NEW: { id, type: 'deposit'|'withdrawal', date, amount, note }
+  settings:     { ...DEFAULT_SETTINGS },
+  mistakes:     [...DEFAULT_MISTAKES],
+  strengths:    [...DEFAULT_STRENGTHS],
 };
 
-/** Load state from localStorage, merge with defaults. */
 function loadState() {
   try {
     const raw = localStorage.getItem(DB_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
       state = {
-        strategy:  saved.strategy  ?? DEFAULT_STRATEGY,
-        trades:    saved.trades    ?? [],
-        settings:  { ...DEFAULT_SETTINGS, ...(saved.settings ?? {}) },
-        mistakes:  saved.mistakes  ?? [...DEFAULT_MISTAKES],
-        strengths: saved.strengths ?? [...DEFAULT_STRENGTHS],
+        strategy:     saved.strategy     ?? DEFAULT_STRATEGY,
+        trades:       saved.trades       ?? [],
+        transactions: saved.transactions ?? [],
+        settings:     { ...DEFAULT_SETTINGS, ...(saved.settings ?? {}) },
+        mistakes:     saved.mistakes     ?? [...DEFAULT_MISTAKES],
+        strengths:    saved.strengths    ?? [...DEFAULT_STRENGTHS],
       };
     }
   } catch (e) {
@@ -139,7 +138,6 @@ function loadState() {
   }
 }
 
-/** Persist current state to localStorage. */
 function saveState() {
   try {
     localStorage.setItem(DB_KEY, JSON.stringify(state));
@@ -152,37 +150,28 @@ function saveState() {
    SECTION 3 — UTILITY HELPERS
    ============================================================ */
 
-/** Generate a short unique id. */
 function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
 
-/** Format a number as currency string. */
-function fmtCurrency(n) {
+function fmtCurrency(n, cur) {
   const sign = n >= 0 ? '+' : '';
-  return sign + Number(n).toFixed(2);
+  return sign + Number(n).toFixed(2) + (cur ? ' ' + cur : '');
 }
 
-/** Format a number as percentage string. */
 function fmtPct(n) {
   return Number(n).toFixed(1) + '%';
 }
 
-/** Get today's date as YYYY-MM-DD. */
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Get current time as HH:MM. */
 function nowTimeStr() {
   const d = new Date();
   return d.toTimeString().slice(0, 5);
 }
 
-/** Show a toast notification.
- *  @param {string} msg
- *  @param {'info'|'success'|'error'} type
- */
 function notify(msg, type = 'info') {
   const el = document.createElement('div');
   el.className = 'notification ' + type;
@@ -191,10 +180,6 @@ function notify(msg, type = 'info') {
   setTimeout(() => el.remove(), 3500);
 }
 
-/** Show a confirmation dialog.
- *  @param {string} msg
- *  @returns {Promise<boolean>}
- */
 function confirm(msg) {
   return new Promise(resolve => {
     const overlay = document.getElementById('confirm-overlay');
@@ -208,11 +193,6 @@ function confirm(msg) {
   });
 }
 
-/** Trigger a file download.
- *  @param {string} content
- *  @param {string} filename
- *  @param {string} mime
- */
 function downloadFile(content, filename, mime = 'application/json') {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([content], { type: mime }));
@@ -229,7 +209,6 @@ function applyTheme() {
   const { theme, accentColor } = state.settings;
   document.documentElement.setAttribute('data-theme', theme === 'system' ? '' : theme);
   document.documentElement.style.setProperty('--accent', accentColor);
-  // Also set the hover colour (darken by shifting hsl lightness)
   document.documentElement.style.setProperty('--accent-h', accentColor);
 }
 
@@ -239,10 +218,7 @@ function applyTheme() {
 
 function initNav() {
   document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const tab = item.dataset.tab;
-      switchTab(tab);
-    });
+    item.addEventListener('click', () => switchTab(item.dataset.tab));
   });
 }
 
@@ -252,12 +228,11 @@ function switchTab(tab) {
   document.querySelector(`.nav-item[data-tab="${tab}"]`)?.classList.add('active');
   document.getElementById(`tab-${tab}`)?.classList.add('active');
 
-  // Refresh tab content on switch
   if (tab === 'dashboard')  renderDashboard();
   if (tab === 'statistics') renderStatistics();
   if (tab === 'journal')    renderJournal();
+  if (tab === 'account')    renderAccount();
   if (tab === 'new-trade') {
-    // Only reset if not in edit mode
     if (!_editingTradeId) resetTradeForm();
     renderChecklist();
   }
@@ -266,6 +241,22 @@ function switchTab(tab) {
 /* ============================================================
    SECTION 6 — DASHBOARD
    ============================================================ */
+
+/** Compute the "live" balance = starting balance + all deposits/withdrawals + all trade PnL */
+function computeLiveBalance() {
+  const txnNet = state.transactions.reduce((sum, t) => {
+    return sum + (t.type === 'deposit' ? t.amount : -t.amount);
+  }, 0);
+  const tradeNet = state.trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+  return state.settings.startingBalance + txnNet + tradeNet;
+}
+
+/** Total net deposits (deposits minus withdrawals) */
+function computeNetDeposits() {
+  return state.transactions.reduce((sum, t) => {
+    return sum + (t.type === 'deposit' ? t.amount : -t.amount);
+  }, 0);
+}
 
 function renderDashboard() {
   const trades = state.trades;
@@ -278,7 +269,8 @@ function renderDashboard() {
   const totalLoss   = losses.reduce((a, t) => a + (t.pnl || 0), 0);
   const netProfit   = totalProfit + totalLoss;
 
-  const winRate  = trades.length > 0 ? (wins.length / trades.filter(t => t.outcome).length * 100) || 0 : 0;
+  const completedTrades = trades.filter(t => t.outcome);
+  const winRate  = completedTrades.length > 0 ? (wins.length / completedTrades.length * 100) : 0;
   const avgRR    = trades.length > 0 ? trades.reduce((a, t) => a + (Number(t.rr) || 0), 0) / trades.length : 0;
   const pf       = Math.abs(totalLoss) > 0 ? totalProfit / Math.abs(totalLoss) : 0;
 
@@ -292,16 +284,14 @@ function renderDashboard() {
   const largestWin  = pnls.length ? Math.max(...pnls) : 0;
   const largestLoss = pnls.length ? Math.min(...pnls) : 0;
 
-  // Week / month
   const now   = new Date();
-  const weekStart = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
+  const weekStart  = new Date(now); weekStart.setDate(now.getDate() - now.getDay());
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const thisWeek  = trades.filter(t => new Date(t.date) >= weekStart).length;
-  const thisMonth = trades.filter(t => new Date(t.date) >= monthStart).length;
+  const thisWeek   = trades.filter(t => new Date(t.date) >= weekStart).length;
+  const thisMonth  = trades.filter(t => new Date(t.date) >= monthStart).length;
 
-  // Streaks (by date order)
   const sorted = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
-  let curStreak = 0, bestStreak = 0, worstStreak = 0, tempWin = 0, tempLoss = 0;
+  let tempWin = 0, tempLoss = 0, bestStreak = 0, worstStreak = 0, curStreak = 0;
   sorted.forEach(t => {
     if (t.outcome === 'WIN') { tempWin++; tempLoss = 0; }
     else if (t.outcome === 'LOSS') { tempLoss++; tempWin = 0; }
@@ -310,39 +300,48 @@ function renderDashboard() {
   });
   if (sorted.length > 0) {
     const last = sorted[sorted.length - 1];
-    if (last.outcome === 'WIN')       curStreak = tempWin;
+    if (last.outcome === 'WIN')       curStreak =  tempWin;
     else if (last.outcome === 'LOSS') curStreak = -tempLoss;
   }
 
-  // Drawdown (running balance)
+  // Drawdown (running balance includes deposits/withdrawals)
+  const liveBalance = computeLiveBalance();
   let runBal = s.startingBalance, peak = s.startingBalance, maxDD = 0;
-  sorted.forEach(t => {
-    runBal += (t.pnl || 0);
+  // Mix sorted txn + sorted trades for drawdown
+  const events = buildChronologicalEvents();
+  runBal = s.startingBalance; peak = s.startingBalance;
+  events.forEach(ev => {
+    if (ev.kind === 'deposit')     runBal += ev.amount;
+    else if (ev.kind === 'withdrawal') runBal -= ev.amount;
+    else runBal += (ev.pnl || 0);
     if (runBal > peak) peak = runBal;
-    const dd = (peak - runBal) / peak * 100;
+    const dd = peak > 0 ? (peak - runBal) / peak * 100 : 0;
     if (dd > maxDD) maxDD = dd;
   });
 
+  const totalDeposits    = state.transactions.filter(t => t.type === 'deposit').reduce((s, t) => s + t.amount, 0);
+  const totalWithdrawals = state.transactions.filter(t => t.type === 'withdrawal').reduce((s, t) => s + t.amount, 0);
+
   const cards = [
-    { label: 'Current Balance',    value: `$${(s.currentBalance + netProfit).toFixed(2)}` },
-    { label: 'Starting Balance',   value: `$${s.currentBalance.toFixed(2)}` },
-    { label: 'Total Profit',       value: `$${totalProfit.toFixed(2)}`,    cls: 'positive' },
-    { label: 'Total Loss',         value: `$${totalLoss.toFixed(2)}`,      cls: 'negative' },
-    { label: 'Net Profit',         value: `$${netProfit.toFixed(2)}`,      cls: netProfit >= 0 ? 'positive' : 'negative' },
-    { label: 'Max Drawdown',       value: fmtPct(maxDD),                   cls: maxDD > 10 ? 'negative' : '' },
-    { label: 'Largest Win',        value: `$${largestWin.toFixed(2)}`,     cls: 'positive' },
-    { label: 'Largest Loss',       value: `$${largestLoss.toFixed(2)}`,    cls: 'negative' },
-    { label: 'Win Rate',           value: fmtPct(winRate) },
-    { label: 'Average RR',         value: avgRR.toFixed(2) },
-    { label: 'Profit Factor',      value: pf.toFixed(2) },
-    { label: 'Avg Grade',          value: avgGradeN ? numToGrade(avgGradeN) : '-' },
-    { label: 'Avg Psychology',     value: avgPsych ? avgPsych.toFixed(1) + '/10' : '-' },
-    { label: 'Trades This Week',   value: thisWeek },
-    { label: 'Trades This Month',  value: thisMonth },
-    { label: 'Total Trades',       value: trades.length },
-    { label: 'Current Streak',     value: curStreak >= 0 ? `+${curStreak} W` : `${curStreak} L`, cls: curStreak > 0 ? 'positive' : curStreak < 0 ? 'negative' : '' },
-    { label: 'Best Win Streak',    value: `${bestStreak} W`, cls: 'positive' },
-    { label: 'Worst Loss Streak',  value: `${worstStreak} L`, cls: worstStreak > 2 ? 'negative' : '' },
+    { label: 'Live Balance',        value: `$${liveBalance.toFixed(2)}`,        cls: liveBalance >= s.startingBalance ? 'positive' : 'negative' },
+    { label: 'Starting Balance',    value: `$${s.startingBalance.toFixed(2)}` },
+    { label: 'Net Trading P&L',     value: `$${netProfit.toFixed(2)}`,          cls: netProfit >= 0 ? 'positive' : 'negative' },
+    { label: 'Total Deposits',      value: `$${totalDeposits.toFixed(2)}`,      cls: 'positive' },
+    { label: 'Total Withdrawals',   value: `$${totalWithdrawals.toFixed(2)}`,   cls: totalWithdrawals > 0 ? 'negative' : '' },
+    { label: 'Max Drawdown',        value: fmtPct(maxDD),                       cls: maxDD > 10 ? 'negative' : '' },
+    { label: 'Largest Win',         value: `$${largestWin.toFixed(2)}`,         cls: 'positive' },
+    { label: 'Largest Loss',        value: `$${largestLoss.toFixed(2)}`,        cls: 'negative' },
+    { label: 'Win Rate',            value: fmtPct(winRate) },
+    { label: 'Average RR',          value: avgRR.toFixed(2) },
+    { label: 'Profit Factor',       value: pf.toFixed(2) },
+    { label: 'Avg Grade',           value: avgGradeN ? numToGrade(avgGradeN) : '-' },
+    { label: 'Avg Psychology',      value: avgPsych ? avgPsych.toFixed(1) + '/10' : '-' },
+    { label: 'Trades This Week',    value: thisWeek },
+    { label: 'Trades This Month',   value: thisMonth },
+    { label: 'Total Trades',        value: trades.length },
+    { label: 'Current Streak',      value: curStreak >= 0 ? `+${curStreak} W` : `${curStreak} L`, cls: curStreak > 0 ? 'positive' : curStreak < 0 ? 'negative' : '' },
+    { label: 'Best Win Streak',     value: `${bestStreak} W`,  cls: 'positive' },
+    { label: 'Worst Loss Streak',   value: `${worstStreak} L`, cls: worstStreak > 2 ? 'negative' : '' },
   ];
 
   const grid = document.getElementById('dashboard-cards');
@@ -353,6 +352,269 @@ function renderDashboard() {
     </div>
   `).join('');
 }
+
+/* ============================================================
+   SECTION 6B — ACCOUNT TAB (deposits, withdrawals, equity)
+   ============================================================ */
+
+/** Returns all money events sorted by date ascending */
+function buildChronologicalEvents() {
+  const txnEvents = state.transactions.map(t => ({
+    kind:   t.type,   // 'deposit' | 'withdrawal'
+    date:   t.date,
+    amount: t.amount,
+    note:   t.note,
+    id:     t.id,
+  }));
+  const tradeEvents = state.trades.filter(t => t.outcome && t.pnl).map(t => ({
+    kind:  'trade',
+    date:  t.date,
+    pnl:   t.pnl,
+    pair:  t.pair,
+    id:    t.id,
+  }));
+  return [...txnEvents, ...tradeEvents].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function renderAccount() {
+  renderAccountCards();
+  renderEquityCurve();
+  renderTransactionTable();
+}
+
+function renderAccountCards() {
+  const totalDeposits    = state.transactions.filter(t => t.type === 'deposit').reduce((s, t) => s + t.amount, 0);
+  const totalWithdrawals = state.transactions.filter(t => t.type === 'withdrawal').reduce((s, t) => s + t.amount, 0);
+  const netTxn           = totalDeposits - totalWithdrawals;
+  const tradePnl         = state.trades.reduce((s, t) => s + (t.pnl || 0), 0);
+  const liveBalance      = state.settings.startingBalance + netTxn + tradePnl;
+  const roi              = state.settings.startingBalance > 0 ? ((liveBalance - state.settings.startingBalance) / state.settings.startingBalance * 100) : 0;
+
+  const cards = [
+    { label: 'Live Balance',      value: `$${liveBalance.toFixed(2)}`,      cls: liveBalance >= state.settings.startingBalance ? 'positive' : 'negative' },
+    { label: 'Total Deposited',   value: `$${totalDeposits.toFixed(2)}`,    cls: 'positive' },
+    { label: 'Total Withdrawn',   value: `$${totalWithdrawals.toFixed(2)}`, cls: totalWithdrawals > 0 ? 'negative' : '' },
+    { label: 'Net Deposits',      value: (netTxn >= 0 ? '+' : '') + `$${netTxn.toFixed(2)}`, cls: netTxn >= 0 ? 'positive' : 'negative' },
+    { label: 'Net Trading P&L',   value: (tradePnl >= 0 ? '+' : '') + `$${tradePnl.toFixed(2)}`, cls: tradePnl >= 0 ? 'positive' : 'negative' },
+    { label: 'ROI (vs Starting)', value: (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%', cls: roi >= 0 ? 'positive' : 'negative' },
+  ];
+
+  document.getElementById('account-balance-cards').innerHTML = cards.map(c => `
+    <div class="dash-card">
+      <div class="dash-card-label">${c.label}</div>
+      <div class="dash-card-value ${c.cls || ''}">${c.value}</div>
+    </div>
+  `).join('');
+}
+
+function renderEquityCurve() {
+  const canvas = document.getElementById('equity-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  // Build data points
+  const events = buildChronologicalEvents();
+  let balance = state.settings.startingBalance;
+  const points = [{ date: 'Start', balance }];
+
+  events.forEach(ev => {
+    if (ev.kind === 'deposit')    balance += ev.amount;
+    else if (ev.kind === 'withdrawal') balance -= ev.amount;
+    else balance += (ev.pnl || 0);
+    points.push({ date: ev.date, balance });
+  });
+
+  if (points.length < 2) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#888';
+    ctx.font = '13px system-ui';
+    ctx.textAlign = 'center';
+    canvas.width = canvas.offsetWidth || 600;
+    canvas.height = 160;
+    ctx.fillText('Add transactions or trades to see your equity curve.', canvas.width / 2, 80);
+    return;
+  }
+
+  // Responsive sizing
+  canvas.width  = canvas.offsetWidth || 600;
+  canvas.height = 160;
+  const W = canvas.width;
+  const H = canvas.height;
+  const pad = { top: 20, right: 20, bottom: 30, left: 60 };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top  - pad.bottom;
+
+  // Colour tokens from CSS vars
+  const accent   = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()      || '#2563eb';
+  const textMuted= getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()  || '#6b7280';
+  const border   = getComputedStyle(document.documentElement).getPropertyValue('--border').trim()      || '#e5e7eb';
+
+  ctx.clearRect(0, 0, W, H);
+
+  const bals   = points.map(p => p.balance);
+  const minBal = Math.min(...bals);
+  const maxBal = Math.max(...bals);
+  const range  = maxBal - minBal || 1;
+
+  const xOf = i => pad.left + (i / (points.length - 1)) * cW;
+  const yOf = b => pad.top  + cH - ((b - minBal) / range) * cH;
+
+  // Grid lines (4 horizontal)
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (cH / 4) * i;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cW, y); ctx.stroke();
+    const val = maxBal - (range / 4) * i;
+    ctx.fillStyle = textMuted;
+    ctx.font = '10px system-ui';
+    ctx.textAlign = 'right';
+    ctx.fillText('$' + val.toFixed(0), pad.left - 4, y + 4);
+  }
+
+  // Fill under curve
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(points[0].balance));
+  points.forEach((p, i) => ctx.lineTo(xOf(i), yOf(p.balance)));
+  ctx.lineTo(xOf(points.length - 1), pad.top + cH);
+  ctx.lineTo(pad.left, pad.top + cH);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+  grad.addColorStop(0, accent + '55');
+  grad.addColorStop(1, accent + '00');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(points[0].balance));
+  points.forEach((p, i) => ctx.lineTo(xOf(i), yOf(p.balance)));
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  ctx.lineJoin  = 'round';
+  ctx.stroke();
+
+  // Dots at events
+  points.forEach((p, i) => {
+    ctx.beginPath();
+    ctx.arc(xOf(i), yOf(p.balance), 3, 0, Math.PI * 2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+  });
+
+  // Starting balance reference line
+  const refY = yOf(state.settings.startingBalance);
+  if (refY >= pad.top && refY <= pad.top + cH) {
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = textMuted;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.left, refY); ctx.lineTo(pad.left + cW, refY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = textMuted;
+    ctx.font = '10px system-ui';
+    ctx.textAlign = 'left';
+    ctx.fillText('Start', pad.left + 4, refY - 3);
+  }
+}
+
+function renderTransactionTable() {
+  const tbody = document.getElementById('txn-tbody');
+  const empty = document.getElementById('txn-empty');
+
+  const txns = [...state.transactions].sort((a, b) => a.date.localeCompare(b.date));
+
+  if (txns.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  // Compute running balance
+  let running = state.settings.startingBalance;
+  const rows = txns.map(t => {
+    running += t.type === 'deposit' ? t.amount : -t.amount;
+    const badgeCls = t.type === 'deposit' ? 'badge-deposit' : 'badge-withdrawal';
+    const amtSign  = t.type === 'deposit' ? '+' : '-';
+    const amtCls   = t.type === 'deposit' ? 'positive' : 'negative';
+    return `
+      <tr>
+        <td>${t.date}</td>
+        <td><span class="badge ${badgeCls}">${t.type.charAt(0).toUpperCase() + t.type.slice(1)}</span></td>
+        <td class="${amtCls}">${amtSign}$${t.amount.toFixed(2)}</td>
+        <td>$${running.toFixed(2)}</td>
+        <td>${esc(t.note || '—')}</td>
+        <td>
+          <div class="tbl-actions">
+            <button class="btn btn-sm btn-danger" onclick="deleteTransaction('${t.id}')">Del</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  // Show newest first in display (reverse), but running balance computed chronologically
+  tbody.innerHTML = rows.reverse().join('');
+}
+
+/* ============================================================
+   SECTION 6C — TRANSACTION MODAL
+   ============================================================ */
+
+let _txnMode = 'deposit'; // 'deposit' | 'withdrawal'
+
+function openTxnModal(type) {
+  _txnMode = type;
+  const overlay = document.getElementById('txn-overlay');
+  document.getElementById('txn-title').textContent = type === 'deposit' ? 'Add Deposit' : 'Add Withdrawal';
+  document.getElementById('txn-type').value  = type;
+  document.getElementById('txn-date').value  = todayStr();
+  document.getElementById('txn-amount').value = '';
+  document.getElementById('txn-note').value   = '';
+  overlay.classList.remove('hidden');
+  setTimeout(() => document.getElementById('txn-amount').focus(), 50);
+}
+
+function closeTxnModal() {
+  document.getElementById('txn-overlay').classList.add('hidden');
+}
+
+function saveTxn() {
+  const type   = document.getElementById('txn-type').value;
+  const date   = document.getElementById('txn-date').value;
+  const amount = parseFloat(document.getElementById('txn-amount').value);
+  const note   = document.getElementById('txn-note').value.trim();
+
+  if (!date) { notify('Please enter a date.', 'error'); return; }
+  if (isNaN(amount) || amount <= 0) { notify('Please enter a valid amount greater than 0.', 'error'); return; }
+
+  // Validate withdrawal doesn't exceed current balance
+  if (type === 'withdrawal') {
+    const liveBalance = computeLiveBalance();
+    if (amount > liveBalance) {
+      notify(`Withdrawal of $${amount.toFixed(2)} exceeds live balance of $${liveBalance.toFixed(2)}.`, 'error');
+      return;
+    }
+  }
+
+  const txn = { id: uid(), type, date, amount, note };
+  state.transactions.push(txn);
+  saveState();
+  closeTxnModal();
+  renderAccount();
+  renderDashboard();
+  notify(`${type.charAt(0).toUpperCase() + type.slice(1)} of $${amount.toFixed(2)} saved.`, 'success');
+}
+
+window.deleteTransaction = async function(id) {
+  const ok = await confirm('Delete this transaction? This cannot be undone.');
+  if (!ok) return;
+  state.transactions = state.transactions.filter(t => t.id !== id);
+  saveState();
+  renderAccount();
+  renderDashboard();
+  notify('Transaction deleted.', 'success');
+};
 
 /* ============================================================
    SECTION 7 — STRATEGY BUILDER
@@ -383,7 +645,6 @@ function renderStrategyBuilder() {
     container.appendChild(catEl);
   });
 
-  // Category name edits
   container.querySelectorAll('.strategy-cat-name').forEach(input => {
     input.addEventListener('change', e => {
       const idx = +e.target.dataset.catIdx;
@@ -391,30 +652,22 @@ function renderStrategyBuilder() {
     });
   });
 
-  // Delete category
   container.querySelectorAll('[data-del-cat]').forEach(btn => {
     btn.addEventListener('click', async e => {
       const idx = +e.currentTarget.dataset.delCat;
       const ok = await confirm(`Remove category "${state.strategy[idx].name}"?`);
-      if (ok) {
-        state.strategy.splice(idx, 1);
-        renderStrategyBuilder();
-      }
+      if (ok) { state.strategy.splice(idx, 1); renderStrategyBuilder(); }
     });
   });
 
-  // Add rule
   container.querySelectorAll('[data-add-rule]').forEach(btn => {
     btn.addEventListener('click', e => {
       const idx = +e.currentTarget.dataset.addRule;
-      state.strategy[idx].rules.push({
-        id: uid(), name: 'New Rule', desc: '', weight: 5, required: false
-      });
+      state.strategy[idx].rules.push({ id: uid(), name: 'New Rule', desc: '', weight: 5, required: false });
       renderStrategyBuilder();
     });
   });
 
-  // Rule field edits (delegated)
   container.querySelectorAll('[data-rule-field]').forEach(input => {
     input.addEventListener('change', e => {
       const { catIdx, rIdx, field } = e.target.dataset;
@@ -426,7 +679,6 @@ function renderStrategyBuilder() {
     });
   });
 
-  // Delete rule
   container.querySelectorAll('[data-del-rule]').forEach(btn => {
     btn.addEventListener('click', e => {
       const { catIdx, rIdx } = e.currentTarget.dataset;
@@ -436,7 +688,6 @@ function renderStrategyBuilder() {
   });
 }
 
-/** Render a single rule row HTML string. */
 function renderRuleRow(catIdx, rIdx, rule) {
   return `
     <div class="strategy-rule">
@@ -456,13 +707,9 @@ function renderRuleRow(catIdx, rIdx, rule) {
 }
 
 /* ============================================================
-   SECTION 8 — CHECKLIST (auto-built from strategy)
+   SECTION 8 — CHECKLIST
    ============================================================ */
 
-/**
- * checklist state: { ruleId: boolean }
- * Lives in the trade form only — saved with the trade.
- */
 let _checklistState = {};
 
 function resetChecklistState() {
@@ -514,7 +761,6 @@ function renderChecklist(filterQuery = '') {
     catEl.appendChild(items);
     container.appendChild(catEl);
 
-    // Collapse toggle
     header.addEventListener('click', () => {
       const isOpen = items.style.display !== 'none';
       items.style.display = isOpen ? 'none' : '';
@@ -522,7 +768,6 @@ function renderChecklist(filterQuery = '') {
     });
   });
 
-  // Listen for checkbox changes
   container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
     cb.addEventListener('change', e => {
       _checklistState[e.target.dataset.ruleId] = e.target.checked;
@@ -538,7 +783,6 @@ function updateChecklistProgress() {
   const total    = allRules.length;
   const checked  = allRules.filter(r => _checklistState[r.id]).length;
   const pct      = total > 0 ? Math.round(checked / total * 100) : 0;
-
   document.getElementById('checklist-progress-bar').style.width = pct + '%';
   document.getElementById('checklist-progress-text').textContent = pct + '%';
 }
@@ -590,9 +834,7 @@ function setPsychValues(values) {
   });
 }
 
-/** Compute a single 1-10 psych score from the slider values. */
 function computePsychScore(psych) {
-  // Positive attrs boost score, negative ones reduce it
   const positive = ['confidence', 'patience', 'discipline', 'focus', 'sleep', 'mood'];
   const negative = ['fear', 'greed', 'stress', 'fatigue'];
   let sum = 0;
@@ -649,11 +891,9 @@ function resetTradeForm() {
     else el.value = '';
   });
 
-  // Set date/time to now
   document.getElementById('f-date').value = todayStr();
   document.getElementById('f-time').value = nowTimeStr();
 
-  // Apply defaults from settings
   if (state.settings.defaultRisk)  document.getElementById('f-risk').value = state.settings.defaultRisk;
   if (state.settings.defaultRR)    document.getElementById('f-rr').value   = state.settings.defaultRR;
 
@@ -668,7 +908,6 @@ function resetTradeForm() {
   document.getElementById('ai-review-text').textContent = 'Fill in the trade details and calculate grade to see a review.';
 }
 
-/** Populate the form with an existing trade (for viewing/editing). */
 function loadTradeIntoForm(trade) {
   _editingTradeId = trade.id;
   document.getElementById('trade-form-title').textContent = 'Edit Trade — ' + trade.pair;
@@ -698,21 +937,14 @@ function loadTradeIntoForm(trade) {
   set('emotion-notes', trade.emotionNotes);
   set('notes',      trade.notes);
 
-  // Checklist
   resetChecklistState();
-  if (trade.checklist) {
-    Object.assign(_checklistState, trade.checklist);
-  }
+  if (trade.checklist) Object.assign(_checklistState, trade.checklist);
   renderChecklist();
 
-  // Psychology
   setPsychValues(trade.psych || {});
-
-  // Mistakes / strengths
   renderMistakes(trade.mistakes || []);
   renderStrengths(trade.strengths || []);
 
-  // Grade
   if (trade.grade) {
     document.getElementById('grade-letter').textContent = trade.grade;
     document.getElementById('grade-reason').textContent = trade.gradeReason || '';
@@ -722,7 +954,6 @@ function loadTradeIntoForm(trade) {
   }
 }
 
-/** Read all form values and return a trade object. */
 function readTradeForm() {
   const g = id => document.getElementById(id)?.value ?? '';
   const psych = getPsychValues();
@@ -780,46 +1011,36 @@ function gradeToNum(g) {
 }
 
 function numToGrade(n) {
-  for (const row of GRADE_SCALE) {
-    if (n >= row.min) return row.grade;
-  }
+  for (const row of GRADE_SCALE) { if (n >= row.min) return row.grade; }
   return 'F';
 }
 
-/**
- * Automatically calculate a grade for a trade.
- * Returns { grade, score, reasons }
- */
 function calculateGrade(trade) {
   const reasons = [];
   let score = 0;
   let maxScore = 0;
 
-  // 1. Checklist compliance (40 points)
   const clPct = trade.checklistPct ?? getChecklistPct();
   const clScore = Math.round(clPct * 0.40);
   score    += clScore;
   maxScore += 40;
   reasons.push(`Checklist: ${clPct}% complete (${clScore}/40 pts)`);
 
-  // Required rules check
-  const allRules    = state.strategy.flatMap(c => c.rules);
-  const reqRules    = allRules.filter(r => r.required);
-  const reqMissed   = reqRules.filter(r => !trade.checklist?.[r.id]);
+  const allRules  = state.strategy.flatMap(c => c.rules);
+  const reqRules  = allRules.filter(r => r.required);
+  const reqMissed = reqRules.filter(r => !trade.checklist?.[r.id]);
   if (reqMissed.length > 0) {
     const penalty = reqMissed.length * 5;
     score -= penalty;
     reasons.push(`${reqMissed.length} required rule(s) missed: -${penalty} pts`);
   }
 
-  // 2. Psychology score (20 points)
   const ps = trade.psychScore ?? computePsychScore(trade.psych ?? {});
   const psScore = Math.round(ps * 2);
   score    += psScore;
   maxScore += 20;
   reasons.push(`Psychology score: ${ps.toFixed(1)}/10 (${psScore}/20 pts)`);
 
-  // 3. RR (20 points)
   const rr = trade.rr ?? 0;
   let rrScore = 0;
   if      (rr >= 4)   rrScore = 20;
@@ -831,7 +1052,6 @@ function calculateGrade(trade) {
   maxScore += 20;
   reasons.push(`RR: ${rr.toFixed(2)} (${rrScore}/20 pts)`);
 
-  // 4. Mistakes (up to -15)
   const mistakeCount = (trade.mistakes ?? []).length;
   if (mistakeCount > 0) {
     const penalty = Math.min(15, mistakeCount * 3);
@@ -841,7 +1061,6 @@ function calculateGrade(trade) {
     reasons.push('No mistakes: full marks');
   }
 
-  // 5. Strengths (up to +10)
   const strengthCount = (trade.strengths ?? []).length;
   if (strengthCount > 0) {
     const bonus = Math.min(10, strengthCount * 2);
@@ -850,23 +1069,19 @@ function calculateGrade(trade) {
     reasons.push(`${strengthCount} strength(s) noted: +${bonus} pts`);
   }
 
-  // Clamp 0-100
-  const finalScore = Math.max(0, Math.min(100, Math.round(score / Math.max(maxScore, 1) * 100)));
-  // Recalculate as a 0-100 from raw
   const rawPct = Math.max(0, Math.min(100, score));
   const grade  = numToGrade(rawPct);
-
   return { grade, score: rawPct, reasons };
 }
 
 function generateAIReview(trade, gradeResult) {
-  const { grade, score, reasons } = gradeResult;
-  const pair    = trade.pair     || 'Unknown Pair';
-  const clPct   = trade.checklistPct ?? 0;
-  const outcome = trade.outcome  || 'pending';
-  const rr      = trade.rr       || 0;
-  const mistakes = trade.mistakes ?? [];
-  const strengths= trade.strengths ?? [];
+  const { grade, score } = gradeResult;
+  const pair     = trade.pair     || 'Unknown Pair';
+  const clPct    = trade.checklistPct ?? 0;
+  const outcome  = trade.outcome  || 'pending';
+  const rr       = trade.rr       || 0;
+  const mistakes  = trade.mistakes ?? [];
+  const strengths = trade.strengths ?? [];
 
   let text = `You completed ${clPct}% of your strategy checklist on this ${pair} ${trade.direction || ''} trade. `;
 
@@ -911,10 +1126,9 @@ function renderJournal() {
   let trades = [...state.trades].sort((a, b) => {
     const da = new Date(a.date + 'T' + (a.time || '00:00'));
     const db = new Date(b.date + 'T' + (b.time || '00:00'));
-    return db - da; // newest first
+    return db - da;
   });
 
-  // Populate pair filter
   const pairs = [...new Set(state.trades.map(t => t.pair).filter(Boolean))].sort();
   const pairSel = document.getElementById('journal-filter-pair');
   const curPair = pairSel.value;
@@ -988,22 +1202,15 @@ function renderStatistics() {
   }
 
   content.innerHTML = '';
-
-  // By Pair
-  content.appendChild(statsGroupTable('By Pair', groupByKey(trades, 'pair')));
-  // By Session
-  content.appendChild(statsGroupTable('By Session', groupByKey(trades, 'session')));
-  // By Day of Week
+  content.appendChild(statsGroupTable('By Pair',        groupByKey(trades, 'pair')));
+  content.appendChild(statsGroupTable('By Session',     groupByKey(trades, 'session')));
   content.appendChild(statsGroupTable('By Day of Week', groupByFn(trades, t => {
     const d = new Date(t.date);
     return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
   })));
-  // By HTF
-  content.appendChild(statsGroupTable('By HTF Bias', groupByKey(trades, 'htf')));
-  // By Grade
-  content.appendChild(statsGroupTable('By Grade', groupByKey(trades, 'grade')));
-  // By Outcome
-  content.appendChild(statsGroupTable('By Outcome', groupByKey(trades, 'outcome')));
+  content.appendChild(statsGroupTable('By HTF Bias',    groupByKey(trades, 'htf')));
+  content.appendChild(statsGroupTable('By Grade',       groupByKey(trades, 'grade')));
+  content.appendChild(statsGroupTable('By Outcome',     groupByKey(trades, 'outcome')));
 }
 
 function groupByKey(trades, key) {
@@ -1032,10 +1239,10 @@ function statsGroupTable(title, groups) {
 
   let rows = '';
   Object.entries(groups).forEach(([key, arr]) => {
-    const wins   = arr.filter(t => t.outcome === 'WIN').length;
-    const losses = arr.filter(t => t.outcome === 'LOSS').length;
-    const total  = arr.length;
-    const wr     = total > 0 ? Math.round(wins / total * 100) : 0;
+    const wins     = arr.filter(t => t.outcome === 'WIN').length;
+    const losses   = arr.filter(t => t.outcome === 'LOSS').length;
+    const total    = arr.length;
+    const wr       = total > 0 ? Math.round(wins / total * 100) : 0;
     const totalPnl = arr.reduce((a, t) => a + (t.pnl || 0), 0);
     const avgRR    = arr.reduce((a, t) => a + (t.rr || 0), 0) / total;
     const pnlCls   = totalPnl >= 0 ? 'positive' : 'negative';
@@ -1065,21 +1272,20 @@ function statsGroupTable(title, groups) {
    SECTION 15 — IMPORT / EXPORT
    ============================================================ */
 
-/** Export all trades as JSON file. */
 function exportJSON() {
   const data = {
-    exportedAt: new Date().toISOString(),
-    version:    1,
-    strategy:   state.strategy,
-    trades:     state.trades,
-    mistakes:   state.mistakes,
-    strengths:  state.strengths,
+    exportedAt:   new Date().toISOString(),
+    version:      2,
+    strategy:     state.strategy,
+    trades:       state.trades,
+    transactions: state.transactions,
+    mistakes:     state.mistakes,
+    strengths:    state.strengths,
   };
   downloadFile(JSON.stringify(data, null, 2), `trading-os-export-${todayStr()}.json`);
   notify('Trades exported as JSON.', 'success');
 }
 
-/** Export trades as CSV (trade data only, no checklist state). */
 function exportCSV() {
   const cols = ['id','date','time','pair','direction','session','htf','ltf',
                 'entry','sl','tp','risk','rr','outcome','pnl','duration',
@@ -1095,7 +1301,6 @@ function exportCSV() {
   notify('Trades exported as CSV.', 'success');
 }
 
-/** Import trades from a previously exported JSON file. */
 function importJSON(file) {
   const reader = new FileReader();
   reader.onload = async e => {
@@ -1108,14 +1313,21 @@ function importJSON(file) {
       const ok = await confirm(`Import ${data.trades.length} trade(s)? Existing trades with the same ID will be overwritten.`);
       if (!ok) return;
 
-      // Merge by ID
       data.trades.forEach(incoming => {
         const idx = state.trades.findIndex(t => t.id === incoming.id);
         if (idx >= 0) state.trades[idx] = incoming;
         else          state.trades.push(incoming);
       });
 
-      // Optionally import strategy if present
+      // Import transactions if present (v2 export)
+      if (data.transactions && Array.isArray(data.transactions)) {
+        data.transactions.forEach(incoming => {
+          const idx = state.transactions.findIndex(t => t.id === incoming.id);
+          if (idx >= 0) state.transactions[idx] = incoming;
+          else          state.transactions.push(incoming);
+        });
+      }
+
       if (data.strategy) {
         const importStrat = await confirm('Import strategy from file too?');
         if (importStrat) state.strategy = data.strategy;
@@ -1131,7 +1343,6 @@ function importJSON(file) {
   reader.readAsText(file);
 }
 
-/** Full backup of all state. */
 function backupAll() {
   downloadFile(JSON.stringify(state, null, 2), `trading-os-FULL-BACKUP-${todayStr()}.json`);
   notify('Full backup downloaded.', 'success');
@@ -1184,18 +1395,18 @@ function initKeyboardShortcuts() {
           break;
       }
     }
+    // ESC closes modals
+    if (e.key === 'Escape') {
+      closeTxnModal();
+    }
   });
 }
 
 function handleSave() {
   const activeTab = document.querySelector('.tab-section.active')?.id;
-  if (activeTab === 'tab-new-trade') {
-    saveTrade();
-  } else if (activeTab === 'tab-settings') {
-    saveSettings();
-  } else if (activeTab === 'tab-strategy') {
-    saveStrategy();
-  }
+  if (activeTab === 'tab-new-trade') saveTrade();
+  else if (activeTab === 'tab-settings') saveSettings();
+  else if (activeTab === 'tab-strategy') saveStrategy();
 }
 
 /* ============================================================
@@ -1205,25 +1416,21 @@ function handleSave() {
 function saveTrade() {
   const trade = readTradeForm();
 
-  // Validate required fields
   if (!trade.pair || !trade.date) {
     notify('Pair and Date are required.', 'error');
     return;
   }
 
-  // Auto-grade
   const gradeResult = calculateGrade(trade);
   trade.grade       = gradeResult.grade;
   trade.gradeReason = gradeResult.reasons.join('\n');
   trade.aiReview    = generateAIReview(trade, gradeResult);
   trade.checklistPct = getChecklistPct();
 
-  // Show grade in form
   document.getElementById('grade-letter').textContent = trade.grade;
   document.getElementById('grade-reason').textContent = trade.gradeReason;
   document.getElementById('ai-review-text').textContent = trade.aiReview;
 
-  // Save to state
   if (_editingTradeId) {
     const idx = state.trades.findIndex(t => t.id === _editingTradeId);
     if (idx >= 0) state.trades[idx] = trade;
@@ -1259,7 +1466,6 @@ function esc(str) {
 
 /* ============================================================
    SECTION 20 — INIT
-   Bind all events and boot the app.
    ============================================================ */
 
 function init() {
@@ -1268,33 +1474,32 @@ function init() {
   initNav();
   initKeyboardShortcuts();
 
-  // --- Render initial views ---
   renderDashboard();
   renderStrategyBuilder();
   renderPsychSliders();
   resetTradeForm();
   loadSettingsForm();
 
-  // --- Sidebar quick button ---
+  // Sidebar quick button
   document.getElementById('btn-new-trade-quick').addEventListener('click', () => {
     _editingTradeId = null;
     resetTradeForm();
     switchTab('new-trade');
   });
 
-  // --- Strategy Builder buttons ---
+  // Strategy Builder
   document.getElementById('btn-add-category').addEventListener('click', () => {
     state.strategy.push({ id: uid(), name: 'New Category', rules: [] });
     renderStrategyBuilder();
   });
   document.getElementById('btn-save-strategy').addEventListener('click', saveStrategy);
 
-  // --- Checklist search ---
+  // Checklist search
   document.getElementById('checklist-search').addEventListener('input', e => {
     renderChecklist(e.target.value);
   });
 
-  // --- Mistakes / Strengths: add custom ---
+  // Mistakes / Strengths custom
   document.getElementById('btn-add-mistake').addEventListener('click', () => {
     const inp = document.getElementById('new-mistake-input');
     const val = inp.value.trim();
@@ -1313,15 +1518,13 @@ function init() {
     inp.value = '';
     renderStrengths(getChecked('strength'));
   });
-
-  // Allow Enter key in add-custom inputs
   ['new-mistake-input', 'new-strength-input'].forEach(id => {
     document.getElementById(id).addEventListener('keydown', e => {
       if (e.key === 'Enter') document.getElementById('btn-add-' + id.replace('new-', '').replace('-input', '')).click();
     });
   });
 
-  // --- Trade form buttons ---
+  // Trade form
   document.getElementById('btn-save-trade').addEventListener('click', saveTrade);
   document.getElementById('btn-reset-form').addEventListener('click', async () => {
     const ok = await confirm('Reset form? Unsaved changes will be lost.');
@@ -1335,12 +1538,12 @@ function init() {
     document.getElementById('ai-review-text').textContent = generateAIReview(trade, result);
   });
 
-  // --- Journal: filters ---
+  // Journal filters
   document.getElementById('journal-search').addEventListener('input', renderJournal);
   document.getElementById('journal-filter-outcome').addEventListener('change', renderJournal);
   document.getElementById('journal-filter-pair').addEventListener('change', renderJournal);
 
-  // --- Import / Export ---
+  // Import / Export
   document.getElementById('btn-export-json').addEventListener('click', exportJSON);
   document.getElementById('btn-export-csv').addEventListener('click', exportCSV);
   document.getElementById('btn-import-json').addEventListener('click', () => {
@@ -1349,21 +1552,37 @@ function init() {
   document.getElementById('import-file-input').addEventListener('change', e => {
     const file = e.target.files[0];
     if (file) importJSON(file);
-    e.target.value = ''; // reset so same file can be re-imported
+    e.target.value = '';
   });
 
-  // --- Settings ---
+  // Account tab: deposit / withdrawal buttons
+  document.getElementById('btn-add-deposit').addEventListener('click', () => openTxnModal('deposit'));
+  document.getElementById('btn-add-withdrawal').addEventListener('click', () => openTxnModal('withdrawal'));
+
+  // Transaction modal: type select → update title
+  document.getElementById('txn-type').addEventListener('change', e => {
+    document.getElementById('txn-title').textContent =
+      e.target.value === 'deposit' ? 'Add Deposit' : 'Add Withdrawal';
+  });
+  document.getElementById('txn-save').addEventListener('click', saveTxn);
+  document.getElementById('txn-cancel').addEventListener('click', closeTxnModal);
+  document.getElementById('txn-amount').addEventListener('keydown', e => {
+    if (e.key === 'Enter') saveTxn();
+  });
+
+  // Settings
   document.getElementById('btn-save-settings').addEventListener('click', saveSettings);
   document.getElementById('btn-backup').addEventListener('click', backupAll);
   document.getElementById('btn-clear-all').addEventListener('click', async () => {
     const ok = await confirm('Clear ALL data? This cannot be undone.');
     if (!ok) return;
     state = {
-      strategy: DEFAULT_STRATEGY,
-      trades:   [],
-      settings: { ...DEFAULT_SETTINGS },
-      mistakes: [...DEFAULT_MISTAKES],
-      strengths:[...DEFAULT_STRENGTHS],
+      strategy:     DEFAULT_STRATEGY,
+      trades:       [],
+      transactions: [],
+      settings:     { ...DEFAULT_SETTINGS },
+      mistakes:     [...DEFAULT_MISTAKES],
+      strengths:    [...DEFAULT_STRENGTHS],
     };
     saveState();
     applyTheme();
@@ -1373,7 +1592,14 @@ function init() {
     loadSettingsForm();
     notify('All data cleared.', 'success');
   });
+
+  // Redraw equity curve on resize
+  window.addEventListener('resize', () => {
+    const accountTab = document.getElementById('tab-account');
+    if (accountTab && accountTab.classList.contains('active')) {
+      renderEquityCurve();
+    }
+  });
 }
 
-// Boot when DOM is ready
 document.addEventListener('DOMContentLoaded', init);

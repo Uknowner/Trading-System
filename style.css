@@ -559,3 +559,62 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* ---------- MISC ---------- */
 .hidden { display: none !important; }
 .text-muted { color: var(--text-muted); }
+
+/* ============================================================
+   TRADING OS — ADDITIONS (deposits, withdrawals, equity curve)
+   ============================================================ */
+
+/* ---------- TRANSACTION MODAL ---------- */
+#txn-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  display: flex; align-items: center; justify-content: center; z-index: 9990;
+}
+#txn-overlay.hidden { display: none; }
+#txn-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  min-width: 320px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0,0,0,.3);
+}
+
+/* ---------- TRANSACTION TABLE ---------- */
+#txn-table-wrap { overflow-x: auto; }
+#txn-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+#txn-table th {
+  background: var(--surface2);
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+#txn-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  vertical-align: middle;
+}
+#txn-table tr:last-child td { border-bottom: none; }
+#txn-table tr:hover td { background: var(--surface2); }
+
+.badge-deposit    { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.badge-withdrawal { background: color-mix(in srgb, var(--danger)  15%, transparent); color: var(--danger); }
+
+/* ---------- EQUITY CANVAS ---------- */
+#equity-canvas { border-radius: 4px; }
+
+/* ---------- ACCOUNT BALANCE CARDS ---------- */
+#account-balance-cards .dash-card { border-top: 3px solid var(--accent); }

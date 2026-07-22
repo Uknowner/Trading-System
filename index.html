@@ -22,6 +22,32 @@
     </div>
   </div>
 
+  <!-- ===================== DEPOSIT/WITHDRAWAL MODAL ===================== -->
+  <div id="txn-overlay" class="hidden">
+    <div id="txn-box">
+      <h2 id="txn-title" class="section-title" style="font-size:15px;margin-bottom:14px;">Add Transaction</h2>
+      <div class="form-grid">
+        <label>Type
+          <select id="txn-type">
+            <option value="deposit">Deposit</option>
+            <option value="withdrawal">Withdrawal</option>
+          </select>
+        </label>
+        <label>Date <input type="date" id="txn-date" /></label>
+        <label class="full-width">Amount ($)
+          <input type="number" id="txn-amount" step="0.01" min="0.01" placeholder="0.00" />
+        </label>
+        <label class="full-width">Note (optional)
+          <input type="text" id="txn-note" placeholder="e.g. Monthly deposit" />
+        </label>
+      </div>
+      <div class="confirm-actions" style="margin-top:16px;">
+        <button id="txn-save" class="btn btn-primary">Save</button>
+        <button id="txn-cancel" class="btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== APP SHELL ===================== -->
   <div id="app">
 
@@ -35,6 +61,7 @@
         <li class="nav-item" data-tab="strategy">Strategy Builder</li>
         <li class="nav-item" data-tab="new-trade">New Trade</li>
         <li class="nav-item" data-tab="journal">Trade Journal</li>
+        <li class="nav-item" data-tab="account">Account</li>
         <li class="nav-item" data-tab="statistics">Statistics</li>
         <li class="nav-item" data-tab="settings">Settings</li>
       </ul>
@@ -50,6 +77,7 @@
       <section id="tab-dashboard" class="tab-section active">
         <h1 class="page-title">Dashboard</h1>
         <div id="dashboard-cards" class="card-grid"></div>
+        <div id="dashboard-equity-section" style="margin-top:20px;"></div>
       </section>
 
       <!-- =================== TAB: STRATEGY BUILDER =================== -->
@@ -239,6 +267,47 @@
             <tbody id="journal-tbody"></tbody>
           </table>
           <p id="journal-empty" class="empty-state">No trades yet. Add your first trade!</p>
+        </div>
+      </section>
+
+      <!-- =================== TAB: ACCOUNT =================== -->
+      <section id="tab-account" class="tab-section">
+        <h1 class="page-title">Account</h1>
+        <p class="page-desc">Track deposits, withdrawals, and your live account balance over time.</p>
+
+        <div class="toolbar">
+          <button class="btn btn-primary btn-sm" id="btn-add-deposit">+ Deposit</button>
+          <button class="btn btn-sm" id="btn-add-withdrawal">− Withdrawal</button>
+        </div>
+
+        <!-- Balance summary cards -->
+        <div id="account-balance-cards" class="card-grid" style="margin-bottom:20px;"></div>
+
+        <!-- Equity curve mini -->
+        <div class="form-section" id="equity-curve-section">
+          <h2 class="section-title">Equity Curve</h2>
+          <canvas id="equity-canvas" height="160" style="width:100%;display:block;"></canvas>
+        </div>
+
+        <!-- Transaction history table -->
+        <div class="form-section">
+          <h2 class="section-title">Transaction History</h2>
+          <div id="txn-table-wrap">
+            <table id="txn-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Amount</th>
+                  <th>Balance After</th>
+                  <th>Note</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="txn-tbody"></tbody>
+            </table>
+            <p id="txn-empty" class="empty-state">No transactions yet. Add a deposit to get started.</p>
+          </div>
         </div>
       </section>
 
