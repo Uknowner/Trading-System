@@ -1,366 +1,377 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Trading OS</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Trading OS v1.4</title>
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 
-  <!-- ===================== NOTIFICATIONS ===================== -->
-  <div id="notification-container"></div>
+<div id="notification-container"></div>
 
-  <!-- ===================== CONFIRM DIALOG ===================== -->
-  <div id="confirm-overlay" class="hidden">
-    <div id="confirm-box">
-      <p id="confirm-message"></p>
-      <div class="confirm-actions">
-        <button id="confirm-yes" class="btn btn-danger">Yes</button>
-        <button id="confirm-no" class="btn">No</button>
-      </div>
+<!-- CONFIRM -->
+<div id="confirm-overlay" class="hidden">
+  <div id="confirm-box">
+    <p id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button id="confirm-yes" class="btn btn-danger">Yes</button>
+      <button id="confirm-no" class="btn">No</button>
     </div>
   </div>
+</div>
 
-  <!-- ===================== DEPOSIT/WITHDRAWAL MODAL ===================== -->
-  <div id="txn-overlay" class="hidden">
-    <div id="txn-box">
-      <h2 id="txn-title" class="section-title" style="font-size:15px;margin-bottom:14px;">Add Transaction</h2>
-      <div class="form-grid">
-        <label>Type
-          <select id="txn-type">
-            <option value="deposit">Deposit</option>
-            <option value="withdrawal">Withdrawal</option>
-          </select>
-        </label>
-        <label>Date <input type="date" id="txn-date" /></label>
-        <label class="full-width">Amount ($)
-          <input type="number" id="txn-amount" step="0.01" min="0.01" placeholder="0.00" />
-        </label>
-        <label class="full-width">Note (optional)
-          <input type="text" id="txn-note" placeholder="e.g. Monthly deposit" />
-        </label>
-      </div>
-      <div class="confirm-actions" style="margin-top:16px;">
-        <button id="txn-save" class="btn btn-primary">Save</button>
-        <button id="txn-cancel" class="btn">Cancel</button>
-      </div>
+<!-- TRANSACTION MODAL -->
+<div id="txn-overlay" class="hidden">
+  <div id="txn-box">
+    <h2 id="txn-title" class="section-title" style="font-size:15px;margin-bottom:4px">Add Transaction</h2>
+    <p id="txn-balance-info" style="font-size:12px;color:var(--text-muted);margin-bottom:14px"></p>
+    <div class="form-grid">
+      <label>Type
+        <select id="txn-type">
+          <option value="deposit">Deposit</option>
+          <option value="withdrawal">Withdrawal</option>
+        </select>
+      </label>
+      <label>Date <input type="date" id="txn-date"/></label>
+      <label class="full-width">Amount ($)
+        <input type="number" id="txn-amount" step="0.01" min="0.01" placeholder="0.00"/>
+      </label>
+      <label class="full-width">Note (optional)
+        <input type="text" id="txn-note" placeholder="e.g. Monthly top-up"/>
+      </label>
+    </div>
+    <div class="confirm-actions" style="margin-top:16px">
+      <button id="txn-save" class="btn btn-primary">Save</button>
+      <button id="txn-cancel" class="btn">Cancel</button>
     </div>
   </div>
+</div>
 
-  <!-- ===================== APP SHELL ===================== -->
-  <div id="app">
+<!-- APP -->
+<div id="app">
 
-    <!-- SIDEBAR -->
-    <nav id="sidebar">
-      <div id="sidebar-header">
-        <span class="logo-text">Trading OS</span>
+  <!-- SIDEBAR -->
+  <nav id="sidebar">
+    <div id="sidebar-header"><span class="logo-text">Trading OS</span></div>
+    <ul id="nav-list">
+      <li class="nav-item active" data-tab="dashboard">Dashboard</li>
+      <li class="nav-item" data-tab="strategy">Strategy Builder</li>
+      <li class="nav-item" data-tab="new-trade">New Trade</li>
+      <li class="nav-item" data-tab="journal">Trade Journal</li>
+      <li class="nav-item" data-tab="account">Account</li>
+      <li class="nav-item" data-tab="statistics">Statistics</li>
+      <li class="nav-item" data-tab="daily">Daily Notes</li>
+      <li class="nav-item" data-tab="settings">Settings</li>
+    </ul>
+    <div id="sidebar-footer">
+      <button class="btn btn-sm" id="btn-new-trade-quick" title="Ctrl+N">+ New Trade</button>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <main id="main-content">
+
+    <!-- DASHBOARD -->
+    <section id="tab-dashboard" class="tab-section active">
+      <h1 class="page-title">Dashboard</h1>
+      <div id="dashboard-cards" class="card-grid"></div>
+      <div id="dashboard-recent" style="margin-top:20px"></div>
+    </section>
+
+    <!-- STRATEGY -->
+    <section id="tab-strategy" class="tab-section">
+      <h1 class="page-title">Strategy Builder</h1>
+      <p class="page-desc">Define your trading rules. The checklist in New Trade rebuilds automatically.</p>
+      <div id="strategy-toolbar" class="toolbar">
+        <button class="btn btn-sm" id="btn-add-category">+ Add Category</button>
+        <button class="btn btn-sm" id="btn-save-strategy">Save Strategy</button>
       </div>
-      <ul id="nav-list">
-        <li class="nav-item active" data-tab="dashboard">Dashboard</li>
-        <li class="nav-item" data-tab="strategy">Strategy Builder</li>
-        <li class="nav-item" data-tab="new-trade">New Trade</li>
-        <li class="nav-item" data-tab="journal">Trade Journal</li>
-        <li class="nav-item" data-tab="account">Account</li>
-        <li class="nav-item" data-tab="statistics">Statistics</li>
-        <li class="nav-item" data-tab="settings">Settings</li>
-      </ul>
-      <div id="sidebar-footer">
-        <button class="btn btn-sm" id="btn-new-trade-quick" title="Ctrl+N">+ New Trade</button>
-      </div>
-    </nav>
+      <div id="strategy-builder"></div>
+    </section>
 
-    <!-- MAIN CONTENT -->
-    <main id="main-content">
+    <!-- NEW TRADE -->
+    <section id="tab-new-trade" class="tab-section">
+      <h1 class="page-title" id="trade-form-title">New Trade</h1>
+      <div id="trade-form-wrap">
 
-      <!-- =================== TAB: DASHBOARD =================== -->
-      <section id="tab-dashboard" class="tab-section active">
-        <h1 class="page-title">Dashboard</h1>
-        <div id="dashboard-cards" class="card-grid"></div>
-        <div id="dashboard-equity-section" style="margin-top:20px;"></div>
-      </section>
-
-      <!-- =================== TAB: STRATEGY BUILDER =================== -->
-      <section id="tab-strategy" class="tab-section">
-        <h1 class="page-title">Strategy Builder</h1>
-        <p class="page-desc">Define your rules here. The checklist in New Trade rebuilds automatically.</p>
-
-        <div id="strategy-toolbar" class="toolbar">
-          <button class="btn btn-sm" id="btn-add-category">+ Add Category</button>
-          <button class="btn btn-sm" id="btn-save-strategy">Save Strategy</button>
-        </div>
-
-        <div id="strategy-builder"></div>
-      </section>
-
-      <!-- =================== TAB: NEW TRADE =================== -->
-      <section id="tab-new-trade" class="tab-section">
-        <h1 class="page-title" id="trade-form-title">New Trade</h1>
-
-        <div id="trade-form-wrap">
-
-          <!-- LEFT: TRADE DATA -->
-          <div id="trade-form-left">
-
-            <div class="form-section">
-              <h2 class="section-title">Trade Details</h2>
-              <div class="form-grid">
-                <label>Pair <input type="text" id="f-pair" placeholder="e.g. XAUUSD" /></label>
-                <label>Direction
-                  <select id="f-direction">
-                    <option value="BUY">BUY</option>
-                    <option value="SELL">SELL</option>
-                  </select>
-                </label>
-                <label>Date <input type="date" id="f-date" /></label>
-                <label>Time <input type="time" id="f-time" /></label>
-                <label>Session
-                  <select id="f-session">
-                    <option>London</option>
-                    <option>New York</option>
-                    <option>Asian</option>
-                    <option>London/NY Overlap</option>
-                    <option>Other</option>
-                  </select>
-                </label>
-                <label>HTF Bias
-                  <select id="f-htf">
-                    <option>Bullish</option>
-                    <option>Bearish</option>
-                    <option>Neutral</option>
-                  </select>
-                </label>
-                <label>Entry TF <input type="text" id="f-ltf" placeholder="e.g. 15M" /></label>
-                <label>Entry Price <input type="number" id="f-entry" step="any" /></label>
-                <label>Stop Loss <input type="number" id="f-sl" step="any" /></label>
-                <label>Take Profit <input type="number" id="f-tp" step="any" /></label>
-                <label>Risk % <input type="number" id="f-risk" step="0.01" /></label>
-                <label>RR <input type="number" id="f-rr" step="0.1" /></label>
-                <label>Outcome
-                  <select id="f-outcome">
-                    <option value="">-- Pending --</option>
-                    <option value="WIN">WIN</option>
-                    <option value="LOSS">LOSS</option>
-                    <option value="BE">BREAKEVEN</option>
-                  </select>
-                </label>
-                <label>P&amp;L ($) <input type="number" id="f-pnl" step="0.01" /></label>
-                <label>Duration <input type="text" id="f-duration" placeholder="e.g. 2h 30m" /></label>
-                <label>News Nearby?
-                  <select id="f-news">
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
-                </label>
-                <label class="full-width">Tags <input type="text" id="f-tags" placeholder="comma separated" /></label>
-                <label class="full-width">Screenshot URL <input type="text" id="f-screenshot" placeholder="https://..." /></label>
-              </div>
-            </div>
-
-            <!-- PSYCHOLOGY -->
-            <div class="form-section">
-              <h2 class="section-title">Psychology</h2>
-              <div id="psychology-sliders"></div>
-              <label class="full-width emotion-notes-label">Emotion Notes
-                <textarea id="f-emotion-notes" rows="3" placeholder="How were you feeling?"></textarea>
-              </label>
-            </div>
-
-            <!-- MISTAKES -->
-            <div class="form-section">
-              <h2 class="section-title">Mistakes</h2>
-              <div id="mistakes-checks" class="tag-checks"></div>
-              <div class="inline-add">
-                <input type="text" id="new-mistake-input" placeholder="Add custom mistake" />
-                <button class="btn btn-sm" id="btn-add-mistake">Add</button>
-              </div>
-            </div>
-
-            <!-- STRENGTHS -->
-            <div class="form-section">
-              <h2 class="section-title">Strengths</h2>
-              <div id="strengths-checks" class="tag-checks"></div>
-              <div class="inline-add">
-                <input type="text" id="new-strength-input" placeholder="Add custom strength" />
-                <button class="btn btn-sm" id="btn-add-strength">Add</button>
-              </div>
-            </div>
-
-            <!-- NOTES -->
-            <div class="form-section">
-              <h2 class="section-title">Trade Notes</h2>
-              <textarea id="f-notes" rows="4" placeholder="General trade notes..."></textarea>
-            </div>
-          </div>
-
-          <!-- RIGHT: CHECKLIST + GRADE -->
-          <div id="trade-form-right">
-
-            <div class="form-section">
-              <h2 class="section-title">Strategy Checklist</h2>
-              <div id="checklist-search-wrap">
-                <input type="text" id="checklist-search" placeholder="Search checklist..." />
-              </div>
-              <div id="checklist-progress-bar-wrap">
-                <div id="checklist-progress-bar"></div>
-                <span id="checklist-progress-text">0%</span>
-              </div>
-              <div id="checklist-container"></div>
-            </div>
-
-            <div class="form-section" id="grade-panel">
-              <h2 class="section-title">Auto Grade</h2>
-              <div id="grade-display">
-                <span id="grade-letter">-</span>
-                <p id="grade-reason"></p>
-              </div>
-              <button class="btn btn-sm" id="btn-calc-grade">Calculate Grade</button>
-            </div>
-
-            <div class="form-section">
-              <h2 class="section-title">AI Review</h2>
-              <div id="ai-review-text">Fill in the trade details and calculate grade to see a review.</div>
-            </div>
-
-            <div class="form-actions">
-              <button class="btn btn-primary" id="btn-save-trade">Save Trade</button>
-              <button class="btn" id="btn-reset-form">Reset</button>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      <!-- =================== TAB: JOURNAL =================== -->
-      <section id="tab-journal" class="tab-section">
-        <h1 class="page-title">Trade Journal</h1>
-        <div class="toolbar">
-          <input type="text" id="journal-search" placeholder="Search trades..." />
-          <select id="journal-filter-outcome">
-            <option value="">All Outcomes</option>
-            <option value="WIN">WIN</option>
-            <option value="LOSS">LOSS</option>
-            <option value="BE">BREAKEVEN</option>
-          </select>
-          <select id="journal-filter-pair">
-            <option value="">All Pairs</option>
-          </select>
-          <button class="btn btn-sm" id="btn-export-json">Export JSON</button>
-          <button class="btn btn-sm" id="btn-import-json">Import JSON</button>
-          <input type="file" id="import-file-input" accept=".json" class="hidden" />
-          <button class="btn btn-sm" id="btn-export-csv">Export CSV</button>
-        </div>
-        <div id="journal-table-wrap">
-          <table id="journal-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Pair</th>
-                <th>Dir</th>
-                <th>Outcome</th>
-                <th>P&amp;L</th>
-                <th>RR</th>
-                <th>Grade</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="journal-tbody"></tbody>
-          </table>
-          <p id="journal-empty" class="empty-state">No trades yet. Add your first trade!</p>
-        </div>
-      </section>
-
-      <!-- =================== TAB: ACCOUNT =================== -->
-      <section id="tab-account" class="tab-section">
-        <h1 class="page-title">Account</h1>
-        <p class="page-desc">Track deposits, withdrawals, and your live account balance over time.</p>
-
-        <div class="toolbar">
-          <button class="btn btn-primary btn-sm" id="btn-add-deposit">+ Deposit</button>
-          <button class="btn btn-sm" id="btn-add-withdrawal">− Withdrawal</button>
-        </div>
-
-        <!-- Balance summary cards -->
-        <div id="account-balance-cards" class="card-grid" style="margin-bottom:20px;"></div>
-
-        <!-- Equity curve mini -->
-        <div class="form-section" id="equity-curve-section">
-          <h2 class="section-title">Equity Curve</h2>
-          <canvas id="equity-canvas" height="160" style="width:100%;display:block;"></canvas>
-        </div>
-
-        <!-- Transaction history table -->
-        <div class="form-section">
-          <h2 class="section-title">Transaction History</h2>
-          <div id="txn-table-wrap">
-            <table id="txn-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Amount</th>
-                  <th>Balance After</th>
-                  <th>Note</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="txn-tbody"></tbody>
-            </table>
-            <p id="txn-empty" class="empty-state">No transactions yet. Add a deposit to get started.</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- =================== TAB: STATISTICS =================== -->
-      <section id="tab-statistics" class="tab-section">
-        <h1 class="page-title">Statistics</h1>
-        <div id="stats-content"></div>
-      </section>
-
-      <!-- =================== TAB: SETTINGS =================== -->
-      <section id="tab-settings" class="tab-section">
-        <h1 class="page-title">Settings</h1>
-        <div id="settings-content">
+        <!-- LEFT -->
+        <div id="trade-form-left">
           <div class="form-section">
-            <h2 class="section-title">Account</h2>
+            <h2 class="section-title">Trade Details</h2>
             <div class="form-grid">
-              <label>Starting Balance ($) <input type="number" id="s-starting-balance" step="0.01" /></label>
-              <label>Current Balance ($) <input type="number" id="s-current-balance" step="0.01" /></label>
-              <label>Default Risk % <input type="number" id="s-default-risk" step="0.01" /></label>
-              <label>Default RR <input type="number" id="s-default-rr" step="0.1" /></label>
-              <label>Currency <input type="text" id="s-currency" placeholder="USD" /></label>
-              <label>Timezone <input type="text" id="s-timezone" placeholder="UTC+2" /></label>
-            </div>
-          </div>
-          <div class="form-section">
-            <h2 class="section-title">Appearance</h2>
-            <div class="form-grid">
-              <label>Theme
-                <select id="s-theme">
-                  <option value="system">System Default</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
+              <label>Pair <input type="text" id="f-pair" placeholder="e.g. XAUUSD"/></label>
+              <label>Direction
+                <select id="f-direction">
+                  <option value="BUY">BUY</option>
+                  <option value="SELL">SELL</option>
                 </select>
               </label>
-              <label>Accent Color <input type="color" id="s-accent-color" /></label>
+              <label>Date <input type="date" id="f-date"/></label>
+              <label>Time <input type="time" id="f-time"/></label>
+              <label>Session
+                <select id="f-session">
+                  <option>London</option><option>New York</option>
+                  <option>Asian</option><option>London/NY Overlap</option><option>Other</option>
+                </select>
+              </label>
+              <label>HTF Bias
+                <select id="f-htf">
+                  <option>Bullish</option><option>Bearish</option><option>Neutral</option>
+                </select>
+              </label>
+              <label>Entry TF <input type="text" id="f-ltf" placeholder="e.g. 15M"/></label>
+              <label>Entry Price <input type="number" id="f-entry" step="any"/></label>
+              <label>Stop Loss <input type="number" id="f-sl" step="any"/></label>
+              <label>Take Profit <input type="number" id="f-tp" step="any"/></label>
+              <label>Risk % <input type="number" id="f-risk" step="0.01"/></label>
+              <label>RR <input type="number" id="f-rr" step="0.1"/></label>
+              <label>Outcome
+                <select id="f-outcome">
+                  <option value="">-- Pending --</option>
+                  <option value="WIN">WIN</option>
+                  <option value="LOSS">LOSS</option>
+                  <option value="BE">BREAKEVEN</option>
+                </select>
+              </label>
+              <label>P&amp;L ($) <input type="number" id="f-pnl" step="0.01"/></label>
+              <label>Duration <input type="text" id="f-duration" placeholder="e.g. 2h 30m"/></label>
+              <label>News Nearby?
+                <select id="f-news">
+                  <option value="no">No</option><option value="yes">Yes</option>
+                </select>
+              </label>
+              <label class="full-width">Tags <input type="text" id="f-tags" placeholder="comma separated"/></label>
+              <label class="full-width">Screenshot URL <input type="text" id="f-screenshot" placeholder="https://..."/></label>
+            </div>
+            <div id="screenshot-preview-wrap" class="hidden" style="margin-top:10px">
+              <img id="screenshot-preview-img" alt="Screenshot"
+                style="max-width:100%;max-height:260px;border-radius:4px;border:1px solid var(--border);object-fit:contain"/>
             </div>
           </div>
+
           <div class="form-section">
-            <h2 class="section-title">Data</h2>
-            <div class="btn-row">
-              <button class="btn btn-sm" id="btn-backup">Backup All Data</button>
-              <button class="btn btn-sm btn-danger" id="btn-clear-all">Clear All Data</button>
+            <h2 class="section-title">Psychology</h2>
+            <div id="psychology-sliders"></div>
+            <label class="full-width emotion-notes-label">Emotion Notes
+              <textarea id="f-emotion-notes" rows="3" placeholder="How were you feeling?"></textarea>
+            </label>
+          </div>
+
+          <div class="form-section">
+            <h2 class="section-title">Mistakes</h2>
+            <div id="mistakes-checks" class="tag-checks"></div>
+            <div class="inline-add">
+              <input type="text" id="new-mistake-input" placeholder="Add custom mistake"/>
+              <button class="btn btn-sm" id="btn-add-mistake">Add</button>
             </div>
           </div>
-          <div class="form-actions">
-            <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+
+          <div class="form-section">
+            <h2 class="section-title">Strengths</h2>
+            <div id="strengths-checks" class="tag-checks"></div>
+            <div class="inline-add">
+              <input type="text" id="new-strength-input" placeholder="Add custom strength"/>
+              <button class="btn btn-sm" id="btn-add-strength">Add</button>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2 class="section-title">Trade Notes</h2>
+            <textarea id="f-notes" rows="4" placeholder="General trade notes..."></textarea>
           </div>
         </div>
-      </section>
 
-    </main>
-  </div>
+        <!-- RIGHT -->
+        <div id="trade-form-right">
+          <div class="form-section">
+            <h2 class="section-title">Strategy Checklist</h2>
+            <div id="checklist-search-wrap">
+              <input type="text" id="checklist-search" placeholder="Search checklist..."/>
+            </div>
+            <div id="checklist-progress-bar-wrap">
+              <div id="checklist-progress-bar"></div>
+              <span id="checklist-progress-text">0%</span>
+            </div>
+            <div id="checklist-container"></div>
+          </div>
 
-  <script src="script.js"></script>
+          <div class="form-section" id="grade-panel">
+            <h2 class="section-title">Auto Grade</h2>
+            <div id="grade-display">
+              <span id="grade-letter">-</span>
+              <p id="grade-reason"></p>
+            </div>
+            <button class="btn btn-sm" id="btn-calc-grade">Calculate Grade</button>
+          </div>
+
+          <div class="form-section">
+            <h2 class="section-title">AI Review</h2>
+            <div id="ai-review-text">Fill in the trade details and calculate grade to see a review.</div>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-primary" id="btn-save-trade">Save Trade</button>
+            <button class="btn" id="btn-reset-form">Reset</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- JOURNAL -->
+    <section id="tab-journal" class="tab-section">
+      <h1 class="page-title">Trade Journal</h1>
+      <div class="toolbar">
+        <input type="text" id="journal-search" placeholder="Search trades..."/>
+        <select id="journal-filter-outcome">
+          <option value="">All Outcomes</option>
+          <option value="WIN">WIN</option>
+          <option value="LOSS">LOSS</option>
+          <option value="BE">BREAKEVEN</option>
+        </select>
+        <select id="journal-filter-pair"><option value="">All Pairs</option></select>
+        <input type="date" id="journal-filter-from" title="From date"/>
+        <input type="date" id="journal-filter-to"   title="To date"/>
+        <button class="btn btn-sm" id="btn-clear-dates">✕ Dates</button>
+      </div>
+      <div class="toolbar" style="margin-top:-8px">
+        <button class="btn btn-sm" id="btn-export-json">Export JSON</button>
+        <button class="btn btn-sm" id="btn-import-json">Import JSON</button>
+        <input type="file" id="import-file-input" accept=".json" class="hidden"/>
+        <button class="btn btn-sm" id="btn-export-csv">Export Trades CSV</button>
+        <button class="btn btn-sm" id="btn-export-site-zip">⬇ Download Site ZIP</button>
+      </div>
+      <div id="journal-table-wrap">
+        <table id="journal-table">
+          <thead>
+            <tr>
+              <th>Date</th><th>Pair</th><th>Dir</th><th>Outcome</th>
+              <th>P&amp;L</th><th>RR</th><th>Grade</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="journal-tbody"></tbody>
+        </table>
+        <p id="journal-empty" class="empty-state">No trades yet. Add your first trade!</p>
+      </div>
+      <div id="journal-pagination" class="toolbar" style="margin-top:12px;justify-content:center"></div>
+    </section>
+
+    <!-- ACCOUNT -->
+    <section id="tab-account" class="tab-section">
+      <h1 class="page-title">Account</h1>
+      <p class="page-desc">
+        <strong>Cash Balance</strong> = what's actually in your broker account (starting + deposits − withdrawals).<br/>
+        <strong>Equity Balance</strong> = cash + net trading P&amp;L. Withdrawals are validated against cash only.
+      </p>
+      <div class="toolbar">
+        <button class="btn btn-primary btn-sm" id="btn-add-deposit">+ Deposit</button>
+        <button class="btn btn-sm" id="btn-add-withdrawal">− Withdrawal</button>
+        <button class="btn btn-sm" id="btn-export-txn-csv">Export Transactions CSV</button>
+      </div>
+      <div id="account-balance-cards" class="card-grid" style="margin-bottom:20px"></div>
+      <div class="form-section">
+        <h2 class="section-title">Equity Curve
+          <span style="font-size:10px;font-weight:400;margin-left:8px">
+            <span style="color:var(--success)">● deposit</span> &nbsp;
+            <span style="color:var(--danger)">● withdrawal</span> &nbsp;
+            <span style="color:var(--accent)">● trade</span>
+          </span>
+        </h2>
+        <canvas id="equity-canvas" height="180" style="width:100%;display:block"></canvas>
+      </div>
+      <div class="form-section">
+        <h2 class="section-title">Transaction History</h2>
+        <div id="txn-table-wrap">
+          <table id="txn-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Type</th><th>Amount</th>
+                <th>Cash Balance After</th><th>Note</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="txn-tbody"></tbody>
+          </table>
+          <p id="txn-empty" class="empty-state">No transactions yet. Add a deposit to get started.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATISTICS -->
+    <section id="tab-statistics" class="tab-section">
+      <h1 class="page-title">Statistics</h1>
+      <div id="stats-content"></div>
+    </section>
+
+    <!-- DAILY NOTES -->
+    <section id="tab-daily" class="tab-section">
+      <h1 class="page-title">Daily Notes</h1>
+      <p class="page-desc">Record your pre-session plan, market bias, and post-session reflections.</p>
+      <div class="form-section">
+        <h2 class="section-title">Write a Note</h2>
+        <div class="form-grid" style="margin-bottom:10px">
+          <label>Date <input type="date" id="daily-note-date"/></label>
+        </div>
+        <textarea id="daily-note-text" rows="7"
+          placeholder="Pre-session: Market bias, key levels, plan...&#10;Post-session: What went well, what to improve..."></textarea>
+        <div class="form-actions" style="margin-top:10px">
+          <button class="btn btn-primary" id="btn-save-daily-note">Save Note</button>
+        </div>
+      </div>
+      <div class="form-section">
+        <h2 class="section-title">Note History</h2>
+        <div id="daily-notes-list"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab-section">
+      <h1 class="page-title">Settings</h1>
+      <div id="settings-content">
+        <div class="form-section">
+          <h2 class="section-title">Account</h2>
+          <div class="form-grid">
+            <label>Starting Balance ($) <input type="number" id="s-starting-balance" step="0.01"/></label>
+            <label>Current Balance ($)  <input type="number" id="s-current-balance"  step="0.01"/></label>
+            <label>Default Risk %       <input type="number" id="s-default-risk"      step="0.01"/></label>
+            <label>Default RR           <input type="number" id="s-default-rr"        step="0.1"/></label>
+            <label>Currency             <input type="text"   id="s-currency" placeholder="USD"/></label>
+            <label>Timezone             <input type="text"   id="s-timezone" placeholder="UTC+2"/></label>
+          </div>
+        </div>
+        <div class="form-section">
+          <h2 class="section-title">Appearance</h2>
+          <div class="form-grid">
+            <label>Theme
+              <select id="s-theme">
+                <option value="system">System Default</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <label>Accent Color <input type="color" id="s-accent-color"/></label>
+          </div>
+        </div>
+        <div class="form-section">
+          <h2 class="section-title">Data</h2>
+          <p class="page-desc" style="margin-bottom:10px">
+            Export JSON contains all trades, transactions, daily notes, and strategy.
+            "Download Site ZIP" packages the three app files so you can run it offline.
+          </p>
+          <div class="btn-row">
+            <button class="btn btn-sm" id="btn-backup">Backup All Data</button>
+            <button class="btn btn-sm btn-danger" id="btn-clear-all">Clear All Data</button>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>
