@@ -525,7 +525,10 @@ function updateTxnModalInfo(){
   const infoEl=document.getElementById('txn-balance-info');
   if(!infoEl)return;
   const cash=computeCashBalance();
-  infoEl.textContent=`Current cash balance: $${cash.toFixed(2)}`;
+  const pnl=computeTradingPnl();
+  const equity=cash+pnl;
+  const pnlStr=(pnl>=0?'+':'')+pnl.toFixed(2);
+  infoEl.textContent=`Available equity: $${equity.toFixed(2)} (cash $${cash.toFixed(2)} + trading P&L $${pnlStr})`;
 }
 
 function closeTxnModal(){
@@ -543,23 +546,24 @@ function saveTxn(){
   if(isNaN(amount)||amount<=0){notify('Please enter a valid amount greater than 0.','error');return;}
 
   if(type==='withdrawal'){
-    // ── FIXED VALIDATION ──────────────────────────────────────────
-    // We validate against CASH BALANCE only (starting + deposits − withdrawals).
-    // Trade P&L does NOT affect whether a withdrawal is physically possible —
-    // the broker only releases real deposited cash.
-    let cashAfterEdit = computeCashBalance();
+    // ── VALIDATION ────────────────────────────────────────────────
+    // We validate against EQUITY BALANCE (cash + trading P&L).
+    // Trade wins are real money you can withdraw; trade losses reduce
+    // what's available. This prevents the balance going below $0.00
+    // when trades are taken into account.
+    let equityAfterEdit = computeEquityBalance();
     if(_editingTxnId){
       // When editing an existing txn, temporarily reverse it so we
-      // compare against the balance *without* that txn.
+      // compare against the equity *without* that txn.
       const old=state.transactions.find(t=>t.id===_editingTxnId);
-      if(old) cashAfterEdit += (old.type==='deposit'? -old.amount : old.amount);
+      if(old) equityAfterEdit += (old.type==='deposit'? -old.amount : old.amount);
     }
-    // cashAfterEdit is now cash balance excluding this transaction
-    const cashAfterWithdrawal = cashAfterEdit - amount;
-    if(cashAfterWithdrawal < 0){
+    // equityAfterEdit is now equity balance excluding this transaction
+    const equityAfterWithdrawal = equityAfterEdit - amount;
+    if(equityAfterWithdrawal < 0){
       notify(
-        `Cannot withdraw $${amount.toFixed(2)}. Cash balance is $${cashAfterEdit.toFixed(2)} ` +
-        `(deposits minus withdrawals). You can withdraw at most $${cashAfterEdit.toFixed(2)}.`,
+        `Cannot withdraw $${amount.toFixed(2)}. Available equity is $${equityAfterEdit.toFixed(2)} ` +
+        `(cash + trading P&L). You can withdraw at most $${equityAfterEdit.toFixed(2)}.`,
         'error'
       );
       return;
