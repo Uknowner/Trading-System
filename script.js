@@ -1,24 +1,16 @@
 /* ============================================================
-   TRADING OS — script.js  v1.4
-   
-   FIXES vs v1.3:
-   - Withdrawal validation now uses CASH balance only
-     (deposits − withdrawals + starting), not gross live balance.
-     This prevents false "exceeds balance" errors when trade P&L
-     is positive and stops negative cash balances from ever forming.
-   - Balance display now shows Cash Balance and Trading P&L
-     separately so you always know what's actually in the account.
-   - Export ZIP now bundles index.html + style.css + script.js
-     (no external dependencies needed).
-   - Edit transactions (not just delete).
-   - Date-range filter on journal.
-   - Monthly P&L table in Statistics.
-   - Recent trades widget on Dashboard.
-   - Trade duplication.
-   - Screenshot preview.
-   - Daily Notes tab.
-   - Transactions CSV export.
-   - Pagination on journal.
+   TRADING OS — script.js  v1.5
+
+   NEW vs v1.4:
+   - Commission, Swap/Overnight, and Other Fees fields on every trade
+   - Net P&L = Gross P&L − all fees (auto-calculated live)
+   - Fees Tracker tab: total commissions, swaps, other fees, fee drag %
+   - Default fees in Settings (pre-fill per trade)
+   - Journal now shows Gross P&L | Fees | Net P&L columns
+   - Dashboard & Account use Net P&L for equity calculations
+   - Statistics use Net P&L
+   - Fees deducted from balance in equity curve
+   - All existing v1.4 features preserved
    ============================================================ */
 
 'use strict';
@@ -83,6 +75,7 @@ const DEFAULT_SETTINGS = {
   defaultRisk:1, defaultRR:2,
   currency:'USD', timezone:'UTC',
   theme:'system', accentColor:'#2563eb',
+  defaultCommission:0, defaultSwap:0, defaultOtherFees:0,
 };
 
 /* ============================================================
@@ -125,35 +118,37 @@ function saveState(){
 }
 
 /* ============================================================
-   SECTION 3 — BALANCE HELPERS  ← CORE FIX IS HERE
+   SECTION 3 — BALANCE HELPERS
    ============================================================ */
 
-/**
- * Cash balance = what is actually deposited into the broker account.
- * This is INDEPENDENT of trade P&L.
- * Formula: startingBalance + all deposits − all withdrawals
- * This is the number brokers see and what withdrawal limits are based on.
- */
 function computeCashBalance(){
   return state.transactions.reduce((bal,t)=>{
     return bal + (t.type==='deposit' ? t.amount : -t.amount);
   }, state.settings.startingBalance);
 }
 
-/**
- * Net trading P&L across all logged trades.
- */
+/** Net trading P&L = sum of all trade net P&Ls (after fees) */
 function computeTradingPnl(){
-  return state.trades.reduce((sum,t)=>sum+(t.pnl||0),0);
+  return state.trades.reduce((sum,t)=>sum+(getNetPnl(t)),0);
 }
 
-/**
- * Live (equity) balance = cash + trading P&L.
- * This is your account equity, which brokers show as "Balance" or "Equity".
- * It CAN differ from cash balance if trades are in flight.
- */
 function computeEquityBalance(){
   return computeCashBalance() + computeTradingPnl();
+}
+
+/** Get total fees for a single trade */
+function getTotalFees(trade){
+  const commission = Number(trade.commission) || 0;
+  const swap       = Number(trade.swap)       || 0; // can be negative (credit)
+  const otherFees  = Number(trade.otherFees)  || 0;
+  // swap negative = cost to trader, positive = credit
+  return commission + (-swap) + otherFees; // total deducted
+}
+
+/** Net P&L after all fees */
+function getNetPnl(trade){
+  const gross = Number(trade.pnl) || 0;
+  return gross - getTotalFees(trade);
 }
 
 /** All money events (txn + completed trades) sorted by date asc */
@@ -161,8 +156,8 @@ function buildChronologicalEvents(){
   const txn = state.transactions.map(t=>({
     kind:t.type, date:t.date, amount:t.amount, note:t.note, id:t.id,
   }));
-  const tr  = state.trades.filter(t=>t.outcome&&t.pnl).map(t=>({
-    kind:'trade', date:t.date, pnl:t.pnl, pair:t.pair, id:t.id,
+  const tr = state.trades.filter(t=>t.outcome&&(t.pnl||t.commission||t.swap||t.otherFees)).map(t=>({
+    kind:'trade', date:t.date, pnl:getNetPnl(t), pair:t.pair, id:t.id,
   }));
   return [...txn,...tr].sort((a,b)=>a.date.localeCompare(b.date));
 }
@@ -175,6 +170,11 @@ function uid(){return Math.random().toString(36).slice(2,9);}
 function fmtPct(n){return Number(n).toFixed(1)+'%';}
 function todayStr(){return new Date().toISOString().slice(0,10);}
 function nowTimeStr(){const d=new Date();return d.toTimeString().slice(0,5);}
+function fmtMoney(n){
+  const abs=Math.abs(n);
+  const str='$'+abs.toFixed(2);
+  return n<0?'-'+str:(n>0?'+'+str:str);
+}
 function monthLabel(s){
   if(!s)return'';const[y,m]=s.split('-');
   return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]+' '+y;
@@ -245,6 +245,7 @@ function switchTab(tab){
   if(tab==='journal')    renderJournal();
   if(tab==='account')    renderAccount();
   if(tab==='daily')      renderDailyNotes();
+  if(tab==='fees')       renderFeesTracker();
   if(tab==='new-trade'){if(!_editingTradeId)resetTradeForm();renderChecklist();}
 }
 
@@ -257,8 +258,10 @@ function renderDashboard(){
   const s=state.settings;
   const wins  =trades.filter(t=>t.outcome==='WIN');
   const losses=trades.filter(t=>t.outcome==='LOSS');
-  const totalProfit=wins.reduce((a,t)=>a+(t.pnl||0),0);
-  const totalLoss  =losses.reduce((a,t)=>a+(t.pnl||0),0);
+
+  // Use net P&L for all calculations
+  const totalProfit=wins.reduce((a,t)=>a+getNetPnl(t),0);
+  const totalLoss  =losses.reduce((a,t)=>a+getNetPnl(t),0);
   const netProfit  =totalProfit+totalLoss;
   const done=trades.filter(t=>t.outcome);
   const winRate=done.length?wins.length/done.length*100:0;
@@ -266,25 +269,27 @@ function renderDashboard(){
   const pf=Math.abs(totalLoss)>0?totalProfit/Math.abs(totalLoss):0;
   const grades=trades.filter(t=>t.grade).map(t=>gradeToNum(t.grade));
   const avgGradeN=grades.length?grades.reduce((a,b)=>a+b,0)/grades.length:null;
-  const pnls=trades.map(t=>t.pnl||0);
-  const largestWin =pnls.length?Math.max(...pnls):0;
-  const largestLoss=pnls.length?Math.min(...pnls):0;
+  const netPnls=trades.map(t=>getNetPnl(t));
+  const largestWin =netPnls.length?Math.max(...netPnls):0;
+  const largestLoss=netPnls.length?Math.min(...netPnls):0;
   const now=new Date();
   const wkStart=new Date(now);wkStart.setDate(now.getDate()-now.getDay());
   const moStart=new Date(now.getFullYear(),now.getMonth(),1);
   const thisWeek =trades.filter(t=>new Date(t.date)>=wkStart).length;
   const thisMonth=trades.filter(t=>new Date(t.date)>=moStart).length;
   const sorted=[...trades].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  let tW=0,tL=0,bestStreak=0,worstStreak=0,curStreak=0;
+  let tW=0,tL=0,bestStreak=0,worstStreak=0;
   sorted.forEach(t=>{
     if(t.outcome==='WIN'){tW++;tL=0;}else if(t.outcome==='LOSS'){tL++;tW=0;}
     bestStreak=Math.max(bestStreak,tW); worstStreak=Math.max(worstStreak,tL);
   });
+  let curStreak=0;
   if(sorted.length){
     const last=sorted[sorted.length-1];
     curStreak=last.outcome==='WIN'?tW:last.outcome==='LOSS'?-tL:0;
   }
-  // Drawdown over equity curve
+
+  // Drawdown
   const events=buildChronologicalEvents();
   let runBal=s.startingBalance,peak=s.startingBalance,maxDD=0;
   events.forEach(ev=>{
@@ -302,11 +307,15 @@ function renderDashboard(){
   const totalDeps=state.transactions.filter(t=>t.type==='deposit').reduce((s,t)=>s+t.amount,0);
   const totalWith=state.transactions.filter(t=>t.type==='withdrawal').reduce((s,t)=>s+t.amount,0);
 
+  // Total fees
+  const totalFees=trades.reduce((a,t)=>a+getTotalFees(t),0);
+
   const cards=[
     {label:'Cash Balance',       value:`$${cashBal.toFixed(2)}`,          cls:cashBal>=s.startingBalance?'positive':'negative'},
     {label:'Equity Balance',     value:`$${equityBal.toFixed(2)}`,         cls:equityBal>=s.startingBalance?'positive':'negative'},
+    {label:'Net Trading P&L',    value:fmtMoney(tradePnl),                 cls:tradePnl>=0?'positive':'negative'},
+    {label:'Total Fees Paid',    value:`$${totalFees.toFixed(2)}`,         cls:'fee-value'},
     {label:'Starting Balance',   value:`$${s.startingBalance.toFixed(2)}`},
-    {label:'Net Trading P&L',    value:`${tradePnl>=0?'+':''}$${tradePnl.toFixed(2)}`, cls:tradePnl>=0?'positive':'negative'},
     {label:'Total Deposited',    value:`$${totalDeps.toFixed(2)}`,         cls:'positive'},
     {label:'Total Withdrawn',    value:`$${totalWith.toFixed(2)}`,         cls:totalWith>0?'negative':''},
     {label:'Max Drawdown',       value:fmtPct(maxDD),                      cls:maxDD>10?'negative':''},
@@ -319,7 +328,7 @@ function renderDashboard(){
     {label:'Trades This Week',   value:thisWeek},
     {label:'Trades This Month',  value:thisMonth},
     {label:'Total Trades',       value:trades.length},
-    {label:'Current Streak',     value:curStreak>=0?`+${curStreak}W`:`${curStreak}L`, cls:curStreak>0?'positive':curStreak<0?'negative':''},
+    {label:'Current Streak',     value:curStreak>=0?`+${curStreak}W`:`${Math.abs(curStreak)}L`, cls:curStreak>0?'positive':curStreak<0?'negative':''},
     {label:'Best Win Streak',    value:`${bestStreak}W`,   cls:'positive'},
     {label:'Worst Loss Streak',  value:`${worstStreak}L`,  cls:worstStreak>2?'negative':''},
   ];
@@ -329,6 +338,10 @@ function renderDashboard(){
       <div class="dash-card-label">${c.label}</div>
       <div class="dash-card-value ${c.cls||''}">${c.value}</div>
     </div>`).join('');
+
+  // Last updated
+  const lu=document.getElementById('dash-last-updated');
+  if(lu)lu.textContent='Updated '+new Date().toLocaleTimeString();
 
   renderRecentTrades();
 }
@@ -345,15 +358,23 @@ function renderRecentTrades(){
       <h2 class="section-title">Recent Trades</h2>
       <div style="overflow-x:auto">
         <table id="journal-table">
-          <thead><tr><th>Date</th><th>Pair</th><th>Dir</th><th>Outcome</th><th>P&L</th><th>Grade</th><th></th></tr></thead>
+          <thead><tr>
+            <th>Date</th><th>Pair</th><th>Dir</th><th>Outcome</th>
+            <th>Net P&L</th><th>Fees</th><th>Grade</th><th></th>
+          </tr></thead>
           <tbody>${recent.map(t=>{
     const bc=t.outcome==='WIN'?'badge-win':t.outcome==='LOSS'?'badge-loss':t.outcome==='BE'?'badge-be':'badge-pending';
-    const pnlStr=t.pnl?(t.pnl>=0?`+$${t.pnl.toFixed(2)}`:`-$${Math.abs(t.pnl).toFixed(2)}`):'—';
-    const pnlCls=t.pnl>0?'positive':t.pnl<0?'negative':'';
+    const net=getNetPnl(t);
+    const fees=getTotalFees(t);
+    const pnlStr=net?(net>=0?`+$${net.toFixed(2)}`:`-$${Math.abs(net).toFixed(2)}`):'—';
+    const pnlCls=net>0?'positive':net<0?'negative':'';
+    const feesStr=fees>0?`-$${fees.toFixed(2)}`:'—';
     return`<tr>
       <td>${t.date||'—'}</td><td>${esc(t.pair||'—')}</td><td>${esc(t.direction||'—')}</td>
       <td><span class="badge ${bc}">${t.outcome||'Pending'}</span></td>
-      <td class="${pnlCls}">${pnlStr}</td><td>${t.grade||'—'}</td>
+      <td class="${pnlCls} mono">${pnlStr}</td>
+      <td class="fee-cell">${feesStr}</td>
+      <td>${t.grade||'—'}</td>
       <td><button class="btn btn-sm" onclick="viewTrade('${t.id}')">View</button></td>
     </tr>`;}).join('')}</tbody>
         </table>
@@ -379,16 +400,18 @@ function renderAccountCards(){
   const totalWith=state.transactions.filter(t=>t.type==='withdrawal').reduce((s,t)=>s+t.amount,0);
   const netCash  =totalDeps-totalWith;
   const roi=state.settings.startingBalance>0?(equityBal-state.settings.startingBalance)/state.settings.startingBalance*100:0;
+  const totalFees=state.trades.reduce((a,t)=>a+getTotalFees(t),0);
 
   const cards=[
     {label:'Cash Balance',        value:`$${cashBal.toFixed(2)}`,        cls:cashBal>=state.settings.startingBalance?'positive':'negative',
      tip:'Starting + deposits − withdrawals. What your broker holds.'},
     {label:'Equity Balance',      value:`$${equityBal.toFixed(2)}`,       cls:equityBal>=state.settings.startingBalance?'positive':'negative',
-     tip:'Cash + trading P&L'},
+     tip:'Cash + net trading P&L (after fees)'},
     {label:'Total Deposited',     value:`$${totalDeps.toFixed(2)}`,       cls:'positive'},
     {label:'Total Withdrawn',     value:`$${totalWith.toFixed(2)}`,       cls:totalWith>0?'negative':''},
     {label:'Net Cash Flow',       value:(netCash>=0?'+':'')+'$'+netCash.toFixed(2), cls:netCash>=0?'positive':'negative'},
     {label:'Net Trading P&L',     value:(tradePnl>=0?'+':'')+'$'+tradePnl.toFixed(2), cls:tradePnl>=0?'positive':'negative'},
+    {label:'Total Fees Paid',     value:`$${totalFees.toFixed(2)}`,       cls:'fee-value'},
     {label:'ROI vs Starting',     value:(roi>=0?'+':'')+roi.toFixed(2)+'%', cls:roi>=0?'positive':'negative'},
   ];
   document.getElementById('account-balance-cards').innerHTML=cards.map(c=>`
@@ -417,8 +440,8 @@ function renderEquityCurve(){
   const pad={top:24,right:20,bottom:28,left:70};
   const cW=W-pad.left-pad.right,cH=H-pad.top-pad.bottom;
   const accent =getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#2563eb';
-  const muted  =getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()||'#6b7280';
-  const borderC=getComputedStyle(document.documentElement).getPropertyValue('--border').trim()||'#e5e7eb';
+  const muted  =getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()||'#64748b';
+  const borderC=getComputedStyle(document.documentElement).getPropertyValue('--border').trim()||'#e2e8f0';
   const success=getComputedStyle(document.documentElement).getPropertyValue('--success').trim()||'#16a34a';
   const danger =getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()||'#dc2626';
   ctx.clearRect(0,0,W,H);
@@ -432,7 +455,6 @@ function renderEquityCurve(){
   const range=maxB-minB||1;
   const xOf=i=>pad.left+(i/(points.length-1))*cW;
   const yOf=b=>pad.top+cH-((b-minB)/range)*cH;
-  // grid
   ctx.strokeStyle=borderC;ctx.lineWidth=1;
   for(let i=0;i<=4;i++){
     const y=pad.top+(cH/4)*i;
@@ -441,7 +463,6 @@ function renderEquityCurve(){
     ctx.fillStyle=muted;ctx.font='10px system-ui';ctx.textAlign='right';
     ctx.fillText('$'+val.toFixed(0),pad.left-5,y+4);
   }
-  // filled area
   ctx.beginPath();
   ctx.moveTo(xOf(0),yOf(points[0].balance));
   points.forEach((p,i)=>ctx.lineTo(xOf(i),yOf(p.balance)));
@@ -451,19 +472,16 @@ function renderEquityCurve(){
   const grad=ctx.createLinearGradient(0,pad.top,0,pad.top+cH);
   grad.addColorStop(0,accent+'44');grad.addColorStop(1,accent+'00');
   ctx.fillStyle=grad;ctx.fill();
-  // line
   ctx.beginPath();
   ctx.moveTo(xOf(0),yOf(points[0].balance));
   points.forEach((p,i)=>ctx.lineTo(xOf(i),yOf(p.balance)));
   ctx.strokeStyle=accent;ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.stroke();
-  // event dots (coloured by kind)
   points.forEach((p,i)=>{
     const col=p.kind==='deposit'?success:p.kind==='withdrawal'?danger:p.kind==='trade'?accent:muted;
     ctx.beginPath();ctx.arc(xOf(i),yOf(p.balance),4,0,Math.PI*2);
     ctx.fillStyle=col;ctx.fill();
     ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
   });
-  // starting balance dashed ref
   const refY=yOf(state.settings.startingBalance);
   if(refY>=pad.top&&refY<=pad.top+cH){
     ctx.setLineDash([5,4]);ctx.strokeStyle=muted;ctx.lineWidth=1;
@@ -489,8 +507,8 @@ function renderTransactionTable(){
     return`<tr>
       <td>${t.date}</td>
       <td><span class="badge ${bc}">${t.type==='deposit'?'Deposit':'Withdrawal'}</span></td>
-      <td class="${cls}">${sign}$${t.amount.toFixed(2)}</td>
-      <td>$${running.toFixed(2)}</td>
+      <td class="${cls} mono">${sign}$${t.amount.toFixed(2)}</td>
+      <td class="mono">$${running.toFixed(2)}</td>
       <td>${esc(t.note||'—')}</td>
       <td><div class="tbl-actions">
         <button class="btn btn-sm" onclick="editTransaction('${t.id}')">Edit</button>
@@ -502,7 +520,7 @@ function renderTransactionTable(){
 }
 
 /* ============================================================
-   SECTION 9 — TRANSACTION MODAL  ← VALIDATION FIX HERE
+   SECTION 9 — TRANSACTION MODAL
    ============================================================ */
 
 let _editingTxnId=null;
@@ -515,7 +533,6 @@ function openTxnModal(type,existing=null){
   document.getElementById('txn-date').value  =existing?existing.date:todayStr();
   document.getElementById('txn-amount').value=existing?existing.amount:'';
   document.getElementById('txn-note').value  =existing?(existing.note||''):'';
-  // Show balance info in the modal
   updateTxnModalInfo();
   document.getElementById('txn-overlay').classList.remove('hidden');
   setTimeout(()=>document.getElementById('txn-amount').focus(),60);
@@ -528,7 +545,7 @@ function updateTxnModalInfo(){
   const pnl=computeTradingPnl();
   const equity=cash+pnl;
   const pnlStr=(pnl>=0?'+':'')+pnl.toFixed(2);
-  infoEl.textContent=`Available equity: $${equity.toFixed(2)} (cash $${cash.toFixed(2)} + trading P&L $${pnlStr})`;
+  infoEl.textContent=`Available equity: $${equity.toFixed(2)} (cash $${cash.toFixed(2)} + net P&L $${pnlStr})`;
 }
 
 function closeTxnModal(){
@@ -546,24 +563,16 @@ function saveTxn(){
   if(isNaN(amount)||amount<=0){notify('Please enter a valid amount greater than 0.','error');return;}
 
   if(type==='withdrawal'){
-    // ── VALIDATION ────────────────────────────────────────────────
-    // We validate against EQUITY BALANCE (cash + trading P&L).
-    // Trade wins are real money you can withdraw; trade losses reduce
-    // what's available. This prevents the balance going below $0.00
-    // when trades are taken into account.
     let equityAfterEdit = computeEquityBalance();
     if(_editingTxnId){
-      // When editing an existing txn, temporarily reverse it so we
-      // compare against the equity *without* that txn.
       const old=state.transactions.find(t=>t.id===_editingTxnId);
       if(old) equityAfterEdit += (old.type==='deposit'? -old.amount : old.amount);
     }
-    // equityAfterEdit is now equity balance excluding this transaction
     const equityAfterWithdrawal = equityAfterEdit - amount;
     if(equityAfterWithdrawal < 0){
       notify(
-        `Cannot withdraw $${amount.toFixed(2)}. Available equity is $${equityAfterEdit.toFixed(2)} ` +
-        `(cash + trading P&L). You can withdraw at most $${equityAfterEdit.toFixed(2)}.`,
+        `Cannot withdraw $${amount.toFixed(2)}. Available equity is $${equityAfterEdit.toFixed(2)}. ` +
+        `You can withdraw at most $${equityAfterEdit.toFixed(2)}.`,
         'error'
       );
       return;
@@ -788,7 +797,8 @@ function resetTradeForm(){
   _editingTradeId=null;
   document.getElementById('trade-form-title').textContent='New Trade';
   ['pair','direction','date','time','session','htf','ltf','entry','sl','tp',
-   'risk','rr','outcome','pnl','duration','news','tags','screenshot','emotion-notes','notes'].forEach(f=>{
+   'risk','rr','outcome','pnl','duration','news','tags','screenshot',
+   'emotion-notes','notes','commission','swap','other-fees'].forEach(f=>{
     const el=document.getElementById('f-'+f);
     if(!el)return;
     if(el.tagName==='SELECT')el.selectedIndex=0; else el.value='';
@@ -797,6 +807,11 @@ function resetTradeForm(){
   document.getElementById('f-time').value=nowTimeStr();
   if(state.settings.defaultRisk)document.getElementById('f-risk').value=state.settings.defaultRisk;
   if(state.settings.defaultRR)  document.getElementById('f-rr').value  =state.settings.defaultRR;
+  // Pre-fill default fees
+  if(state.settings.defaultCommission) document.getElementById('f-commission').value=state.settings.defaultCommission;
+  if(state.settings.defaultSwap)       document.getElementById('f-swap').value=state.settings.defaultSwap;
+  if(state.settings.defaultOtherFees)  document.getElementById('f-other-fees').value=state.settings.defaultOtherFees;
+  updateNetPnlDisplay();
   resetChecklistState();renderChecklist();renderMistakes();renderStrengths();setPsychValues({});
   document.getElementById('grade-letter').textContent='-';
   document.getElementById('grade-reason').textContent='';
@@ -812,6 +827,11 @@ function loadTradeIntoForm(trade){
    'risk','rr','outcome','pnl','duration','news'].forEach(f=>set(f,trade[f]));
   set('tags',(trade.tags||[]).join(', '));
   set('screenshot',trade.screenshot);set('emotion-notes',trade.emotionNotes);set('notes',trade.notes);
+  // Fees
+  set('commission', trade.commission??'');
+  set('swap',       trade.swap??'');
+  set('other-fees', trade.otherFees??'');
+  updateNetPnlDisplay();
   resetChecklistState();
   if(trade.checklist)Object.assign(_checklistState,trade.checklist);
   renderChecklist();setPsychValues(trade.psych||{});
@@ -827,6 +847,10 @@ function loadTradeIntoForm(trade){
 function readTradeForm(){
   const g=id=>document.getElementById(id)?.value??'';
   const psych=getPsychValues();
+  const commission = parseFloat(g('f-commission'))||0;
+  const swap       = parseFloat(g('f-swap'))||0;
+  const otherFees  = parseFloat(g('f-other-fees'))||0;
+  const grossPnl   = parseFloat(g('f-pnl'))||0;
   return{
     id:_editingTradeId||uid(),
     pair:g('f-pair').toUpperCase(),direction:g('f-direction'),
@@ -834,7 +858,8 @@ function readTradeForm(){
     htf:g('f-htf'),ltf:g('f-ltf'),
     entry:Number(g('f-entry')),sl:Number(g('f-sl')),tp:Number(g('f-tp')),
     risk:Number(g('f-risk')),rr:Number(g('f-rr')),
-    outcome:g('f-outcome'),pnl:Number(g('f-pnl')),
+    outcome:g('f-outcome'),pnl:grossPnl,
+    commission, swap, otherFees,
     duration:g('f-duration'),news:g('f-news'),
     tags:g('f-tags').split(',').map(s=>s.trim()).filter(Boolean),
     screenshot:g('f-screenshot'),emotionNotes:g('f-emotion-notes'),notes:g('f-notes'),
@@ -842,6 +867,19 @@ function readTradeForm(){
     mistakes:getChecked('mistake'),strengths:getChecked('strength'),
     checklist:{..._checklistState},checklistPct:getChecklistPct(),
   };
+}
+
+function updateNetPnlDisplay(){
+  const gross  = parseFloat(document.getElementById('f-pnl')?.value)||0;
+  const comm   = parseFloat(document.getElementById('f-commission')?.value)||0;
+  const swap   = parseFloat(document.getElementById('f-swap')?.value)||0;
+  const other  = parseFloat(document.getElementById('f-other-fees')?.value)||0;
+  const net    = gross - comm - (-swap) - other;
+  const el     = document.getElementById('net-pnl-value');
+  if(!el)return;
+  if(gross===0&&comm===0&&swap===0&&other===0){el.textContent='—';el.className='net-pnl-value';return;}
+  el.textContent=(net>=0?'+':'')+'$'+net.toFixed(2);
+  el.className='net-pnl-value'+(net>0?' positive':net<0?' negative':'');
 }
 
 function updateScreenshotPreview(url){
@@ -894,12 +932,14 @@ function calculateGrade(trade){
 function generateAIReview(trade,g){
   const pair=trade.pair||'Unknown';const cl=trade.checklistPct??0;
   const rr=trade.rr||0;const m=trade.mistakes??[];const str=trade.strengths??[];
+  const fees=getTotalFees(trade);
   let t=`You completed ${cl}% of your strategy checklist on this ${pair} ${trade.direction||''} trade. `;
   t+=cl>=90?'Plan adherence was excellent. ':cl>=70?'Adherence was acceptable but could improve. ':'A significant portion was skipped — this requires attention. ';
   t+=trade.psychScore>=7?'Mental state was solid. ':trade.psychScore>=5?'Mental state was average. ':'Poor psychology may have influenced decisions. ';
   t+=rr>=2?`Risk-reward of ${rr.toFixed(2)} was within acceptable parameters. `:`Risk-reward of ${rr.toFixed(2)} was below the recommended minimum. `;
   t+=m.length===0?'No mistakes recorded — strong discipline. ':`Mistakes noted: ${m.join(', ')}. Work to eliminate these. `;
   if(str.length)t+=`Positive behaviours: ${str.join(', ')}. `;
+  if(fees>0)t+=`Total fees were $${fees.toFixed(2)} — factor this into your risk calculations consistently. `;
   if(trade.outcome==='WIN')t+='Trade closed as a winner. ';
   else if(trade.outcome==='LOSS')t+='Trade closed as a loss. Process matters more than outcome. ';
   else if(trade.outcome==='BE')t+='Trade closed at breakeven. ';
@@ -950,13 +990,21 @@ function renderJournalPage(){
 
   tbody.innerHTML=page.map(t=>{
     const bc=t.outcome==='WIN'?'badge-win':t.outcome==='LOSS'?'badge-loss':t.outcome==='BE'?'badge-be':'badge-pending';
-    const ps=t.pnl?(t.pnl>=0?`+$${t.pnl.toFixed(2)}`:`-$${Math.abs(t.pnl).toFixed(2)}`):'—';
-    const pc=t.pnl>0?'positive':t.pnl<0?'negative':'';
+    const gross=Number(t.pnl)||0;
+    const fees=getTotalFees(t);
+    const net=getNetPnl(t);
+    const grossStr=gross?(gross>=0?`+$${gross.toFixed(2)}`:`-$${Math.abs(gross).toFixed(2)}`):'—';
+    const grossCls=gross>0?'positive':gross<0?'negative':'';
+    const netStr=net?(net>=0?`+$${net.toFixed(2)}`:`-$${Math.abs(net).toFixed(2)}`):'—';
+    const netCls=net>0?'positive':net<0?'negative':'';
+    const feesStr=fees>0?`-$${fees.toFixed(2)}`:'—';
     return`<tr>
       <td>${t.date||'—'} ${t.time||''}</td>
       <td>${esc(t.pair||'—')}</td><td>${esc(t.direction||'—')}</td>
       <td><span class="badge ${bc}">${t.outcome||'Pending'}</span></td>
-      <td class="${pc}">${ps}</td>
+      <td class="${grossCls} mono">${grossStr}</td>
+      <td class="fee-cell">${feesStr}</td>
+      <td class="${netCls} mono">${netStr}</td>
       <td>${t.rr?t.rr.toFixed(2):'—'}</td>
       <td>${t.grade||'—'}</td>
       <td><div class="tbl-actions">
@@ -1030,18 +1078,22 @@ function statsGroupTable(title,groups){
     const losses=arr.filter(t=>t.outcome==='LOSS').length;
     const total=arr.length;
     const wr=total?Math.round(wins/total*100):0;
-    const pnl=arr.reduce((a,t)=>a+(t.pnl||0),0);
+    const grossPnl=arr.reduce((a,t)=>a+(t.pnl||0),0);
+    const netPnl=arr.reduce((a,t)=>a+getNetPnl(t),0);
+    const fees=arr.reduce((a,t)=>a+getTotalFees(t),0);
     const avgRR=arr.reduce((a,t)=>a+(t.rr||0),0)/total;
     rows+=`<tr>
       <td>${esc(key)}</td><td>${total}</td><td>${wins}W / ${losses}L</td>
       <td>${wr}%</td>
-      <td class="${pnl>=0?'positive':'negative'}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</td>
+      <td class="${grossPnl>=0?'positive':'negative'}">${grossPnl>=0?'+':''}$${grossPnl.toFixed(2)}</td>
+      <td class="fee-cell">-$${fees.toFixed(2)}</td>
+      <td class="${netPnl>=0?'positive':'negative'}">${netPnl>=0?'+':''}$${netPnl.toFixed(2)}</td>
       <td>${avgRR.toFixed(2)}</td>
     </tr>`;
   });
   el.innerHTML=`<h2 class="section-title">${title}</h2>
     <table class="stats-table">
-      <thead><tr><th>Group</th><th>Trades</th><th>W/L</th><th>Win Rate</th><th>Total P&L</th><th>Avg RR</th></tr></thead>
+      <thead><tr><th>Group</th><th>Trades</th><th>W/L</th><th>Win Rate</th><th>Gross P&L</th><th>Fees</th><th>Net P&L</th><th>Avg RR</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   return el;
@@ -1051,28 +1103,140 @@ function monthlyPnlTable(trades){
   const g={};
   trades.forEach(t=>{
     const m=(t.date||'').slice(0,7);if(!m)return;
-    if(!g[m])g[m]={pnl:0,wins:0,losses:0,be:0,trades:0};
-    g[m].pnl+=(t.pnl||0);g[m].trades++;
+    if(!g[m])g[m]={grossPnl:0,netPnl:0,fees:0,wins:0,losses:0,be:0,trades:0};
+    g[m].grossPnl+=(t.pnl||0);
+    g[m].netPnl+=getNetPnl(t);
+    g[m].fees+=getTotalFees(t);
+    g[m].trades++;
     if(t.outcome==='WIN')g[m].wins++;else if(t.outcome==='LOSS')g[m].losses++;else g[m].be++;
   });
   let cum=0,rows='';
   Object.keys(g).sort().forEach(m=>{
-    const d=g[m];cum+=d.pnl;
+    const d=g[m];cum+=d.netPnl;
     const wr=d.trades?Math.round(d.wins/d.trades*100):0;
     rows+=`<tr>
       <td>${monthLabel(m)}</td><td>${d.trades}</td>
       <td>${d.wins}W / ${d.losses}L${d.be?` / ${d.be}BE`:''}</td>
       <td>${wr}%</td>
-      <td class="${d.pnl>=0?'positive':'negative'}">${d.pnl>=0?'+':''}$${d.pnl.toFixed(2)}</td>
+      <td class="${d.grossPnl>=0?'positive':'negative'}">${d.grossPnl>=0?'+':''}$${d.grossPnl.toFixed(2)}</td>
+      <td class="fee-cell">-$${d.fees.toFixed(2)}</td>
+      <td class="${d.netPnl>=0?'positive':'negative'}">${d.netPnl>=0?'+':''}$${d.netPnl.toFixed(2)}</td>
       <td class="${cum>=0?'positive':'negative'}">${cum>=0?'+':''}$${cum.toFixed(2)}</td>
     </tr>`;
   });
   el.innerHTML=`<h2 class="section-title">Monthly P&L</h2>
     <table class="stats-table">
-      <thead><tr><th>Month</th><th>Trades</th><th>W/L/BE</th><th>Win Rate</th><th>Month P&L</th><th>Cumulative</th></tr></thead>
+      <thead><tr><th>Month</th><th>Trades</th><th>W/L/BE</th><th>Win Rate</th><th>Gross P&L</th><th>Fees</th><th>Net P&L</th><th>Cumulative</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   return el;
+}
+
+/* ============================================================
+   SECTION 17b — FEES TRACKER
+   ============================================================ */
+
+function renderFeesTracker(){
+  const c=document.getElementById('fees-content');
+  const trades=state.trades;
+  if(!trades.length){c.innerHTML='<p class="text-muted">No trades yet. Add trades with fee data to see your fee analysis.</p>';return;}
+
+  const totalCommission = trades.reduce((a,t)=>a+(Number(t.commission)||0),0);
+  const totalSwapCost   = trades.reduce((a,t)=>{const s=Number(t.swap)||0;return a+(-s);},0);
+  const totalOther      = trades.reduce((a,t)=>a+(Number(t.otherFees)||0),0);
+  const totalFees       = trades.reduce((a,t)=>a+getTotalFees(t),0);
+  const grossPnl        = trades.reduce((a,t)=>a+(Number(t.pnl)||0),0);
+  const netPnl          = trades.reduce((a,t)=>a+getNetPnl(t),0);
+  const feeDragPct      = grossPnl!==0 ? (totalFees/Math.abs(grossPnl)*100) : 0;
+  const tradesWithFees  = trades.filter(t=>getTotalFees(t)>0).length;
+  const avgFeePerTrade  = tradesWithFees>0 ? totalFees/tradesWithFees : 0;
+
+  c.innerHTML='';
+
+  // Summary cards
+  const summaryDiv=document.createElement('div');
+  summaryDiv.className='fees-summary-grid';
+  const feeCards=[
+    {label:'Total Fees Paid',       value:`$${totalFees.toFixed(2)}`},
+    {label:'Total Commissions',     value:`$${totalCommission.toFixed(2)}`},
+    {label:'Total Swap Costs',      value:`$${totalSwapCost.toFixed(2)}`},
+    {label:'Other Fees',            value:`$${totalOther.toFixed(2)}`},
+    {label:'Fee Drag on Gross P&L', value:`${feeDragPct.toFixed(1)}%`},
+    {label:'Avg Fee Per Trade',     value:`$${avgFeePerTrade.toFixed(2)}`},
+    {label:'Gross P&L',             value:(grossPnl>=0?'+':'')+'$'+grossPnl.toFixed(2)},
+    {label:'Net P&L (After Fees)',  value:(netPnl>=0?'+':'')+'$'+netPnl.toFixed(2)},
+  ];
+  summaryDiv.innerHTML=feeCards.map(fc=>`
+    <div class="fees-card">
+      <div class="fees-card-label">${fc.label}</div>
+      <div class="fees-card-value">${fc.value}</div>
+    </div>`).join('');
+  c.appendChild(summaryDiv);
+
+  // Fees by pair
+  const byPair={};
+  trades.forEach(t=>{
+    const p=t.pair||'Unknown';
+    if(!byPair[p])byPair[p]={commission:0,swap:0,other:0,total:0,trades:0};
+    byPair[p].commission+=Number(t.commission)||0;
+    byPair[p].swap+=(-Number(t.swap)||0);
+    byPair[p].other+=Number(t.otherFees)||0;
+    byPair[p].total+=getTotalFees(t);
+    byPair[p].trades++;
+  });
+
+  const pairGroup=document.createElement('div');pairGroup.className='stats-group';
+  let pairRows='';
+  Object.entries(byPair).sort((a,b)=>b[1].total-a[1].total).forEach(([pair,d])=>{
+    pairRows+=`<tr>
+      <td>${esc(pair)}</td>
+      <td>${d.trades}</td>
+      <td class="fee-cell">$${d.commission.toFixed(2)}</td>
+      <td class="fee-cell">$${d.swap.toFixed(2)}</td>
+      <td class="fee-cell">$${d.other.toFixed(2)}</td>
+      <td class="fee-cell"><strong>$${d.total.toFixed(2)}</strong></td>
+      <td class="fee-cell">$${(d.total/d.trades).toFixed(2)}</td>
+    </tr>`;
+  });
+  pairGroup.innerHTML=`<h2 class="section-title">Fees by Pair</h2>
+    <table class="stats-table">
+      <thead><tr><th>Pair</th><th>Trades</th><th>Commission</th><th>Swap Cost</th><th>Other</th><th>Total Fees</th><th>Avg/Trade</th></tr></thead>
+      <tbody>${pairRows||'<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No fee data recorded yet.</td></tr>'}</tbody>
+    </table>`;
+  c.appendChild(pairGroup);
+
+  // Monthly fees
+  const byMonth={};
+  trades.forEach(t=>{
+    const m=(t.date||'').slice(0,7);if(!m)return;
+    if(!byMonth[m])byMonth[m]={commission:0,swap:0,other:0,total:0,trades:0};
+    byMonth[m].commission+=Number(t.commission)||0;
+    byMonth[m].swap+=(-Number(t.swap)||0);
+    byMonth[m].other+=Number(t.otherFees)||0;
+    byMonth[m].total+=getTotalFees(t);
+    byMonth[m].trades++;
+  });
+  const monthGroup=document.createElement('div');monthGroup.className='stats-group';
+  let monthRows='';
+  let cumFees=0;
+  Object.keys(byMonth).sort().forEach(m=>{
+    const d=byMonth[m];cumFees+=d.total;
+    monthRows+=`<tr>
+      <td>${monthLabel(m)}</td>
+      <td>${d.trades}</td>
+      <td class="fee-cell">$${d.commission.toFixed(2)}</td>
+      <td class="fee-cell">$${d.swap.toFixed(2)}</td>
+      <td class="fee-cell">$${d.other.toFixed(2)}</td>
+      <td class="fee-cell"><strong>$${d.total.toFixed(2)}</strong></td>
+      <td class="fee-cell">$${cumFees.toFixed(2)}</td>
+    </tr>`;
+  });
+  monthGroup.innerHTML=`<h2 class="section-title">Monthly Fees</h2>
+    <table class="stats-table">
+      <thead><tr><th>Month</th><th>Trades</th><th>Commission</th><th>Swap Cost</th><th>Other</th><th>Month Total</th><th>Cumulative</th></tr></thead>
+      <tbody>${monthRows||'<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No data yet.</td></tr>'}</tbody>
+    </table>`;
+  c.appendChild(monthGroup);
 }
 
 /* ============================================================
@@ -1127,12 +1291,12 @@ window.deleteDailyNote=function(date){
 };
 
 /* ============================================================
-   SECTION 19 — IMPORT / EXPORT  ← ZIP EXPORT HERE
+   SECTION 19 — IMPORT / EXPORT
    ============================================================ */
 
 function exportJSON(){
   const data={
-    exportedAt:new Date().toISOString(),version:4,
+    exportedAt:new Date().toISOString(),version:5,
     strategy:state.strategy,trades:state.trades,
     transactions:state.transactions,dailyNotes:state.dailyNotes,
     mistakes:state.mistakes,strengths:state.strengths,settings:state.settings,
@@ -1143,8 +1307,8 @@ function exportJSON(){
 
 function exportCSV(){
   const cols=['id','date','time','pair','direction','session','htf','ltf',
-    'entry','sl','tp','risk','rr','outcome','pnl','duration','news','tags',
-    'grade','checklistPct','psychScore','mistakes','strengths','notes'];
+    'entry','sl','tp','risk','rr','outcome','pnl','commission','swap','otherFees',
+    'duration','news','tags','grade','checklistPct','psychScore','mistakes','strengths','notes'];
   const hdr=cols.join(',');
   const rows=state.trades.map(t=>cols.map(c=>{
     let v=t[c];
@@ -1171,44 +1335,34 @@ function exportTransactionsCSV(){
   notify('Transactions exported as CSV.','success');
 }
 
-/**
- * Export ZIP containing index.html + style.css + script.js
- * Uses a pure-JS minimal ZIP builder (no external library needed).
- */
 function exportSiteZip(){
   notify('Preparing site ZIP...','info');
-  // Grab the live CSS and HTML from the document
   const htmlContent = document.documentElement.outerHTML;
-  // Fetch the CSS and JS files from their <link>/<script> tags
   const cssHref = document.querySelector('link[rel="stylesheet"]')?.href;
   const jsHref  = document.querySelector('script[src]')?.src;
-
   const fetchText = url => url ? fetch(url).then(r=>r.text()).catch(()=>'') : Promise.resolve('');
-
   Promise.all([fetchText(cssHref), fetchText(jsHref)]).then(([cssText, jsText])=>{
     const files = [
-      {name:'trading-os-v1.4/index.html', data: htmlContent},
-      {name:'trading-os-v1.4/style.css',  data: cssText},
-      {name:'trading-os-v1.4/script.js',  data: jsText},
+      {name:'trading-os-v1.5/index.html', data: htmlContent},
+      {name:'trading-os-v1.5/style.css',  data: cssText},
+      {name:'trading-os-v1.5/script.js',  data: jsText},
     ];
     const zip = buildZip(files);
     const blob = new Blob([zip], {type:'application/zip'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `trading-os-v1.4-${todayStr()}.zip`;
+    a.download = `trading-os-v1.5-${todayStr()}.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
     notify('Site ZIP downloaded! Extract and open index.html.','success');
   });
 }
 
-/** Minimal pure-JS ZIP builder — stores files without compression (DEFLATE=0). */
 function buildZip(files){
   const enc = new TextEncoder();
   const parts = [];
   const centralDir = [];
   let offset = 0;
-
   const u32 = n => {const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,n,true);return b;};
   const u16 = n => {const b=new Uint8Array(2);new DataView(b.buffer).setUint16(0,n,true);return b;};
   const crc32Table = (()=>{
@@ -1222,61 +1376,51 @@ function buildZip(files){
     for(let i=0;i<data.length;i++)c=crc32Table[(c^data[i])&0xFF]^(c>>>8);
     return(c^0xFFFFFFFF)>>>0;
   };
-
   const dosDate = (()=>{
     const d=new Date();
     const day=d.getDate(),month=d.getMonth()+1,year=d.getFullYear()-1980;
     const h=d.getHours(),min=d.getMinutes(),sec=Math.floor(d.getSeconds()/2);
     return{date:(year<<9)|(month<<5)|day, time:(h<<11)|(min<<5)|sec};
   })();
-
   files.forEach(f=>{
     const nameBytes = enc.encode(f.name);
     const dataBytes = enc.encode(f.data);
     const crc = crc32(dataBytes);
     const localHeader = new Uint8Array([
-      0x50,0x4B,0x03,0x04,  // local file sig
-      20,0,                   // version needed
-      0,0,                    // flags
-      0,0,                    // no compression
+      0x50,0x4B,0x03,0x04, 20,0, 0,0, 0,0,
       ...u16(dosDate.time),...u16(dosDate.date),
       ...u32(crc),
       ...u32(dataBytes.length),...u32(dataBytes.length),
-      ...u16(nameBytes.length),...u16(0), // extra len
+      ...u16(nameBytes.length),...u16(0),
     ]);
     const localEntry = new Uint8Array(localHeader.length+nameBytes.length+dataBytes.length);
     localEntry.set(localHeader);
     localEntry.set(nameBytes,localHeader.length);
     localEntry.set(dataBytes,localHeader.length+nameBytes.length);
     parts.push(localEntry);
-
     const cdEntry = new Uint8Array([
-      0x50,0x4B,0x01,0x02,  // central dir sig
-      20,0,20,0,             // version made/needed
-      0,0,0,0,               // flags, compress
+      0x50,0x4B,0x01,0x02, 20,0,20,0, 0,0,0,0,
       ...u16(dosDate.time),...u16(dosDate.date),
       ...u32(crc),
       ...u32(dataBytes.length),...u32(dataBytes.length),
-      ...u16(nameBytes.length),...u16(0),...u16(0), // extra, comment
-      ...u16(0),...u16(0),   // disk start, internal attr
-      ...u32(0),             // external attr
-      ...u32(offset),        // local header offset
+      ...u16(nameBytes.length),...u16(0),...u16(0),
+      ...u16(0),...u16(0),
+      ...u32(0),
+      ...u32(offset),
     ]);
     const cd = new Uint8Array(cdEntry.length+nameBytes.length);
     cd.set(cdEntry);cd.set(nameBytes,cdEntry.length);
     centralDir.push(cd);
     offset+=localEntry.length;
   });
-
   const cdBytes = centralDir.reduce((a,b)=>{const n=new Uint8Array(a.length+b.length);n.set(a);n.set(b,a.length);return n;},new Uint8Array(0));
   const eocd = new Uint8Array([
-    0x50,0x4B,0x05,0x06,   // EOCD sig
-    ...u16(0),...u16(0),   // disk numbers
+    0x50,0x4B,0x05,0x06,
+    ...u16(0),...u16(0),
     ...u16(files.length),...u16(files.length),
     ...u32(cdBytes.length),...u32(offset),
-    ...u16(0),             // comment length
+    ...u16(0),
   ]);
-
   const total=parts.reduce((a,b)=>a+b.length,0)+cdBytes.length+eocd.length;
   const out=new Uint8Array(total);
   let pos=0;
@@ -1333,16 +1477,22 @@ function loadSettingsForm(){
   document.getElementById('s-timezone').value        =s.timezone;
   document.getElementById('s-theme').value           =s.theme;
   document.getElementById('s-accent-color').value    =s.accentColor;
+  document.getElementById('s-default-commission').value = s.defaultCommission||0;
+  document.getElementById('s-default-swap').value       = s.defaultSwap||0;
+  document.getElementById('s-default-other-fees').value = s.defaultOtherFees||0;
 }
 function saveSettings(){
-  state.settings.startingBalance=Number(document.getElementById('s-starting-balance').value);
-  state.settings.currentBalance =Number(document.getElementById('s-current-balance').value);
-  state.settings.defaultRisk    =Number(document.getElementById('s-default-risk').value);
-  state.settings.defaultRR      =Number(document.getElementById('s-default-rr').value);
-  state.settings.currency       =document.getElementById('s-currency').value.trim();
-  state.settings.timezone       =document.getElementById('s-timezone').value.trim();
-  state.settings.theme          =document.getElementById('s-theme').value;
-  state.settings.accentColor    =document.getElementById('s-accent-color').value;
+  state.settings.startingBalance   =Number(document.getElementById('s-starting-balance').value);
+  state.settings.currentBalance    =Number(document.getElementById('s-current-balance').value);
+  state.settings.defaultRisk       =Number(document.getElementById('s-default-risk').value);
+  state.settings.defaultRR         =Number(document.getElementById('s-default-rr').value);
+  state.settings.currency          =document.getElementById('s-currency').value.trim();
+  state.settings.timezone          =document.getElementById('s-timezone').value.trim();
+  state.settings.theme             =document.getElementById('s-theme').value;
+  state.settings.accentColor       =document.getElementById('s-accent-color').value;
+  state.settings.defaultCommission =Number(document.getElementById('s-default-commission').value)||0;
+  state.settings.defaultSwap       =Number(document.getElementById('s-default-swap').value)||0;
+  state.settings.defaultOtherFees  =Number(document.getElementById('s-default-other-fees').value)||0;
   saveState();applyTheme();notify('Settings saved.','success');
 }
 
@@ -1390,7 +1540,11 @@ function saveTrade(){
   }else{
     state.trades.push(trade);_editingTradeId=trade.id;
   }
-  saveState();notify('Trade saved! Grade: '+trade.grade,'success');
+  saveState();
+  const net=getNetPnl(trade);
+  const fees=getTotalFees(trade);
+  const feeNote=fees>0?` (fees: $${fees.toFixed(2)}, net: ${net>=0?'+':''}$${net.toFixed(2)})`:'';
+  notify(`Trade saved! Grade: ${trade.grade}${feeNote}`,'success');
   document.getElementById('trade-form-title').textContent='Edit Trade — '+trade.pair;
 }
 function saveStrategy(){saveState();renderStrategyBuilder();notify('Strategy saved.','success');}
@@ -1419,6 +1573,11 @@ function init(){
 
   // Screenshot
   document.getElementById('f-screenshot').addEventListener('input',e=>updateScreenshotPreview(e.target.value));
+
+  // Live net P&L calculation
+  ['f-pnl','f-commission','f-swap','f-other-fees'].forEach(id=>{
+    document.getElementById(id)?.addEventListener('input',updateNetPnlDisplay);
+  });
 
   // Mistakes / Strengths
   document.getElementById('btn-add-mistake').addEventListener('click',()=>{
