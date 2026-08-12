@@ -136,13 +136,14 @@ function computeEquityBalance(){
   return computeCashBalance() + computeTradingPnl();
 }
 
-/** Get total fees for a single trade */
+/** Get total fees for a single trade.
+ *  swap field convention: positive = overnight cost, negative = credit received.
+ *  Total fees deducted = commission + swap + otherFees  */
 function getTotalFees(trade){
   const commission = Number(trade.commission) || 0;
-  const swap       = Number(trade.swap)       || 0; // can be negative (credit)
+  const swap       = Number(trade.swap)       || 0;
   const otherFees  = Number(trade.otherFees)  || 0;
-  // swap negative = cost to trader, positive = credit
-  return commission + (-swap) + otherFees; // total deducted
+  return commission + swap + otherFees;
 }
 
 /** Net P&L after all fees */
@@ -807,10 +808,10 @@ function resetTradeForm(){
   document.getElementById('f-time').value=nowTimeStr();
   if(state.settings.defaultRisk)document.getElementById('f-risk').value=state.settings.defaultRisk;
   if(state.settings.defaultRR)  document.getElementById('f-rr').value  =state.settings.defaultRR;
-  // Pre-fill default fees
-  if(state.settings.defaultCommission) document.getElementById('f-commission').value=state.settings.defaultCommission;
-  if(state.settings.defaultSwap)       document.getElementById('f-swap').value=state.settings.defaultSwap;
-  if(state.settings.defaultOtherFees)  document.getElementById('f-other-fees').value=state.settings.defaultOtherFees;
+  // Pre-fill default fees (use != null so 0 still clears/fills correctly)
+  document.getElementById('f-commission').value = state.settings.defaultCommission ?? 0;
+  document.getElementById('f-swap').value       = state.settings.defaultSwap       ?? 0;
+  document.getElementById('f-other-fees').value = state.settings.defaultOtherFees  ?? 0;
   updateNetPnlDisplay();
   resetChecklistState();renderChecklist();renderMistakes();renderStrengths();setPsychValues({});
   document.getElementById('grade-letter').textContent='-';
@@ -874,7 +875,7 @@ function updateNetPnlDisplay(){
   const comm   = parseFloat(document.getElementById('f-commission')?.value)||0;
   const swap   = parseFloat(document.getElementById('f-swap')?.value)||0;
   const other  = parseFloat(document.getElementById('f-other-fees')?.value)||0;
-  const net    = gross - comm - (-swap) - other;
+  const net    = gross - comm - swap - other;
   const el     = document.getElementById('net-pnl-value');
   if(!el)return;
   if(gross===0&&comm===0&&swap===0&&other===0){el.textContent='—';el.className='net-pnl-value';return;}
