@@ -616,3 +616,96 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .positive   { color: var(--success); font-weight: 600; }
 .negative   { color: var(--danger);  font-weight: 600; }
 .mono { font-family: var(--font-mono); }
+
+/* ============================================================
+   v1.6.3 ADDITIONS
+   ============================================================ */
+
+/* ---------- RISK CALCULATOR ---------- */
+#calc-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) { #calc-wrap { grid-template-columns: 1fr; } }
+
+.calc-results-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.calc-result-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  transition: border-color var(--trans);
+}
+.calc-result-card.highlight {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.calc-result-label {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-muted); margin-bottom: 4px;
+}
+.calc-result-value {
+  font-size: 20px; font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text);
+  letter-spacing: -.02em;
+}
+
+/* ---------- GOALS ---------- */
+.goal-progress-item {
+  margin-bottom: 16px;
+}
+.goal-progress-header {
+  display: flex; align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.goal-progress-label {
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.goal-progress-value {
+  font-size: 12px; color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.goal-bar-wrap {
+  height: 8px; background: var(--border);
+  border-radius: 99px; overflow: hidden;
+}
+.goal-bar {
+  height: 100%; border-radius: 99px;
+  transition: width .4s ease;
+  background: var(--accent);
+}
+.goal-bar.good   { background: var(--success); }
+.goal-bar.warn   { background: var(--warning); }
+.goal-bar.danger { background: var(--danger); }
+
+.goal-alert {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ---------- WEEKLY REVIEW ---------- */
+#weekly-best-trade, #weekly-worst-trade {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}

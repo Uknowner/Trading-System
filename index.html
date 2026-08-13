@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Trading OS v1.5</title>
+  <title>Trading OS v1.6.3</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -82,6 +82,15 @@
       <li class="nav-item" data-tab="fees">
         <span class="nav-icon">$</span> Fees Tracker
       </li>
+      <li class="nav-item" data-tab="calculator">
+        <span class="nav-icon">⊞</span> Risk Calc
+      </li>
+      <li class="nav-item" data-tab="goals">
+        <span class="nav-icon">◎</span> Goals
+      </li>
+      <li class="nav-item" data-tab="weekly">
+        <span class="nav-icon">📅</span> Weekly Review
+      </li>
       <li class="nav-item" data-tab="daily">
         <span class="nav-icon">✎</span> Daily Notes
       </li>
@@ -91,7 +100,7 @@
     </ul>
     <div id="sidebar-footer">
       <button class="btn btn-sm btn-accent" id="btn-new-trade-quick" title="Ctrl+N">+ New Trade</button>
-      <div class="sidebar-version">v1.5</div>
+      <div class="sidebar-version">v1.6.3</div>
     </div>
   </nav>
 
@@ -394,6 +403,179 @@
       <div id="fees-content"></div>
     </section>
 
+    <!-- RISK CALCULATOR -->
+    <section id="tab-calculator" class="tab-section">
+      <div class="page-header">
+        <h1 class="page-title">Risk Calculator</h1>
+        <p class="page-desc">Calculate your position size before entering a trade. Results auto-populate into New Trade.</p>
+      </div>
+      <div id="calc-wrap">
+        <div class="form-section" id="calc-form-section">
+          <h2 class="section-title">Position Size Calculator</h2>
+          <div class="form-grid">
+            <label>Account Balance ($)
+              <input type="number" id="calc-balance" step="0.01" placeholder="e.g. 10000"/>
+              <span class="field-hint">Pulled from your equity balance automatically</span>
+            </label>
+            <label>Risk % per Trade
+              <input type="number" id="calc-risk-pct" step="0.01" placeholder="e.g. 1"/>
+              <span class="field-hint">How much of account to risk</span>
+            </label>
+            <label>Risk $ Amount
+              <input type="number" id="calc-risk-dollar" step="0.01" placeholder="Auto-calculated" readonly/>
+              <span class="field-hint">Balance × Risk %</span>
+            </label>
+            <label>Entry Price
+              <input type="number" id="calc-entry" step="any" placeholder="e.g. 1.08500"/>
+            </label>
+            <label>Stop Loss Price
+              <input type="number" id="calc-sl" step="any" placeholder="e.g. 1.08200"/>
+            </label>
+            <label>Take Profit Price
+              <input type="number" id="calc-tp" step="any" placeholder="e.g. 1.09100"/>
+            </label>
+            <label>Pair Type
+              <select id="calc-pair-type">
+                <option value="forex">Forex (e.g. EURUSD)</option>
+                <option value="gold">Gold (XAUUSD)</option>
+                <option value="indices">Indices / Custom</option>
+              </select>
+            </label>
+            <label>Pip/Point Value ($)
+              <input type="number" id="calc-pip-value" step="any" placeholder="e.g. 10"/>
+              <span class="field-hint">Value per pip/point per lot (standard)</span>
+            </label>
+          </div>
+          <div class="form-actions" style="margin-top:14px">
+            <button class="btn btn-primary" id="btn-calc-position">Calculate</button>
+            <button class="btn" id="btn-calc-to-trade">→ Send to New Trade</button>
+          </div>
+        </div>
+
+        <div class="form-section" id="calc-results-section">
+          <h2 class="section-title">Results</h2>
+          <div id="calc-results-grid" class="calc-results-grid">
+            <div class="calc-result-card">
+              <div class="calc-result-label">SL Distance (pips)</div>
+              <div class="calc-result-value" id="cr-sl-pips">—</div>
+            </div>
+            <div class="calc-result-card">
+              <div class="calc-result-label">TP Distance (pips)</div>
+              <div class="calc-result-value" id="cr-tp-pips">—</div>
+            </div>
+            <div class="calc-result-card">
+              <div class="calc-result-label">Risk : Reward</div>
+              <div class="calc-result-value" id="cr-rr">—</div>
+            </div>
+            <div class="calc-result-card">
+              <div class="calc-result-label">$ at Risk</div>
+              <div class="calc-result-value negative" id="cr-risk-dollar">—</div>
+            </div>
+            <div class="calc-result-card highlight">
+              <div class="calc-result-label">Lot Size</div>
+              <div class="calc-result-value" id="cr-lots">—</div>
+            </div>
+            <div class="calc-result-card">
+              <div class="calc-result-label">Potential Profit</div>
+              <div class="calc-result-value positive" id="cr-profit">—</div>
+            </div>
+          </div>
+
+          <h2 class="section-title" style="margin-top:20px">Trade Visualizer</h2>
+          <canvas id="calc-canvas" height="120" style="width:100%;display:block;border-radius:6px"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- GOALS -->
+    <section id="tab-goals" class="tab-section">
+      <div class="page-header">
+        <h1 class="page-title">Goals &amp; Limits</h1>
+        <p class="page-desc">Set monthly profit targets and daily/overall risk limits. Live progress tracked against your trade history.</p>
+      </div>
+      <div class="toolbar">
+        <button class="btn btn-primary btn-sm" id="btn-save-goals">Save Goals</button>
+      </div>
+      <div class="form-section">
+        <h2 class="section-title">Monthly Targets</h2>
+        <div class="form-grid">
+          <label>Monthly Profit Target ($)
+            <input type="number" id="g-monthly-target" step="0.01" min="0" placeholder="e.g. 500"/>
+            <span class="field-hint">Net P&L goal for the current calendar month</span>
+          </label>
+          <label>Min Win Rate Target (%)
+            <input type="number" id="g-win-rate" step="0.1" min="0" max="100" placeholder="e.g. 55"/>
+          </label>
+          <label>Min Avg RR Target
+            <input type="number" id="g-avg-rr" step="0.1" min="0" placeholder="e.g. 1.5"/>
+          </label>
+          <label>Max Trades per Day
+            <input type="number" id="g-max-daily-trades" step="1" min="0" placeholder="e.g. 3"/>
+          </label>
+        </div>
+      </div>
+      <div class="form-section">
+        <h2 class="section-title">Risk Limits</h2>
+        <div class="form-grid">
+          <label>Max Daily Loss ($)
+            <input type="number" id="g-max-daily-loss" step="0.01" min="0" placeholder="e.g. 200"/>
+            <span class="field-hint">Stop trading today if breached</span>
+          </label>
+          <label>Max Drawdown (%)
+            <input type="number" id="g-max-dd" step="0.1" min="0" max="100" placeholder="e.g. 10"/>
+            <span class="field-hint">Max % drop from equity peak before stopping</span>
+          </label>
+          <label>Max Consecutive Losses
+            <input type="number" id="g-max-loss-streak" step="1" min="0" placeholder="e.g. 3"/>
+            <span class="field-hint">Take a break after this many losses in a row</span>
+          </label>
+        </div>
+      </div>
+      <div id="goals-progress-section" class="form-section">
+        <h2 class="section-title">Live Progress — <span id="goals-month-label"></span></h2>
+        <div id="goals-progress-wrap"></div>
+      </div>
+      <div id="goals-alerts-section" class="form-section" style="display:none">
+        <h2 class="section-title" style="color:var(--danger)">⚠ Active Alerts</h2>
+        <div id="goals-alerts-wrap"></div>
+      </div>
+    </section>
+
+    <!-- WEEKLY REVIEW -->
+    <section id="tab-weekly" class="tab-section">
+      <div class="page-header">
+        <h1 class="page-title">Weekly Review</h1>
+        <p class="page-desc">Automatic summary of each trading week. Add reflections to build your improvement loop.</p>
+      </div>
+      <div class="toolbar">
+        <label style="font-size:12px;color:var(--text-muted);font-weight:600;flex-direction:row;align-items:center;gap:8px;display:flex">
+          Week of:
+          <input type="date" id="weekly-pick-date" style="width:160px"/>
+        </label>
+        <button class="btn btn-sm" id="btn-weekly-prev">← Prev Week</button>
+        <button class="btn btn-sm" id="btn-weekly-next">Next Week →</button>
+        <button class="btn btn-sm btn-primary" id="btn-save-weekly-note">Save Reflection</button>
+      </div>
+      <div id="weekly-stats-cards" class="card-grid" style="margin-bottom:16px"></div>
+      <div class="form-section">
+        <h2 class="section-title">Trades This Week</h2>
+        <div id="weekly-trades-table"></div>
+      </div>
+      <div class="form-section">
+        <h2 class="section-title">Best Trade</h2>
+        <div id="weekly-best-trade" class="text-muted" style="font-size:13px">—</div>
+      </div>
+      <div class="form-section">
+        <h2 class="section-title">Worst Trade</h2>
+        <div id="weekly-worst-trade" class="text-muted" style="font-size:13px">—</div>
+      </div>
+      <div class="form-section">
+        <h2 class="section-title">Weekly Reflection</h2>
+        <textarea id="weekly-note-text" rows="6"
+          placeholder="What went well this week?&#10;What mistakes did you repeat?&#10;What will you do differently next week?&#10;Key market observations..."></textarea>
+      </div>
+    </section>
+
     <!-- DAILY NOTES -->
     <section id="tab-daily" class="tab-section">
       <div class="page-header">
@@ -454,6 +636,14 @@
               </select>
             </label>
             <label>Accent Color <input type="color" id="s-accent-color"/></label>
+          </div>
+        </div>
+        <div class="form-section">
+          <h2 class="section-title">Trader Profile</h2>
+          <div class="form-grid">
+            <label>Broker Name <input type="text" id="s-broker" placeholder="e.g. IC Markets"/></label>
+            <label>Account Type <input type="text" id="s-account-type" placeholder="e.g. Raw Spread"/></label>
+            <label>Max Lots per Trade <input type="number" id="s-max-lots" step="0.01" min="0" placeholder="e.g. 5"/></label>
           </div>
         </div>
         <div class="form-section">

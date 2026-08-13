@@ -1,5 +1,12 @@
 /* ============================================================
-   TRADING OS — script.js  v1.5
+   TRADING OS — script.js  v1.6.3
+
+   NEW vs v1.5:
+   - Risk / Position Size Calculator with visual trade diagram
+   - Goals & Limits: monthly targets, daily loss cap, drawdown alert, loss streak
+   - Weekly Review: auto-aggregated stats + reflection notes per week
+   - Trader Profile fields in Settings (broker, account type, max lots)
+   - Calculator results auto-populate New Trade form
 
    NEW vs v1.4:
    - Commission, Swap/Overnight, and Other Fees fields on every trade
@@ -76,6 +83,11 @@ const DEFAULT_SETTINGS = {
   currency:'USD', timezone:'UTC',
   theme:'system', accentColor:'#2563eb',
   defaultCommission:0, defaultSwap:0, defaultOtherFees:0,
+  broker:'', accountType:'', maxLots:0,
+};
+const DEFAULT_GOALS = {
+  monthlyTarget:0, winRateTarget:0, avgRrTarget:0, maxDailyTrades:0,
+  maxDailyLoss:0, maxDrawdown:0, maxLossStreak:0,
 };
 
 /* ============================================================
@@ -89,7 +101,9 @@ let state = {
   trades:      [],
   transactions:[], // {id, type:'deposit'|'withdrawal', date, amount, note}
   dailyNotes:  [], // {id, date, note}
+  weeklyNotes: [], // {id, weekStart (YYYY-MM-DD Monday), note}
   settings:    {...DEFAULT_SETTINGS},
+  goals:       {...DEFAULT_GOALS},
   mistakes:    [...DEFAULT_MISTAKES],
   strengths:   [...DEFAULT_STRENGTHS],
 };
@@ -104,7 +118,9 @@ function loadState(){
         trades:      s.trades       ?? [],
         transactions:s.transactions ?? [],
         dailyNotes:  s.dailyNotes   ?? [],
+        weeklyNotes: s.weeklyNotes  ?? [],
         settings:    {...DEFAULT_SETTINGS,...(s.settings??{})},
+        goals:       {...DEFAULT_GOALS,...(s.goals??{})},
         mistakes:    s.mistakes     ?? [...DEFAULT_MISTAKES],
         strengths:   s.strengths    ?? [...DEFAULT_STRENGTHS],
       };
@@ -136,14 +152,13 @@ function computeEquityBalance(){
   return computeCashBalance() + computeTradingPnl();
 }
 
-/** Get total fees for a single trade.
- *  swap field convention: positive = overnight cost, negative = credit received.
- *  Total fees deducted = commission + swap + otherFees  */
+/** Get total fees for a single trade */
 function getTotalFees(trade){
   const commission = Number(trade.commission) || 0;
-  const swap       = Number(trade.swap)       || 0;
+  const swap       = Number(trade.swap)       || 0; // can be negative (credit)
   const otherFees  = Number(trade.otherFees)  || 0;
-  return commission + swap + otherFees;
+  // swap negative = cost to trader, positive = credit
+  return commission + (-swap) + otherFees; // total deducted
 }
 
 /** Net P&L after all fees */
@@ -247,6 +262,9 @@ function switchTab(tab){
   if(tab==='account')    renderAccount();
   if(tab==='daily')      renderDailyNotes();
   if(tab==='fees')       renderFeesTracker();
+  if(tab==='calculator') renderCalculator();
+  if(tab==='goals')      renderGoals();
+  if(tab==='weekly')     renderWeeklyReview();
   if(tab==='new-trade'){if(!_editingTradeId)resetTradeForm();renderChecklist();}
 }
 
@@ -808,10 +826,10 @@ function resetTradeForm(){
   document.getElementById('f-time').value=nowTimeStr();
   if(state.settings.defaultRisk)document.getElementById('f-risk').value=state.settings.defaultRisk;
   if(state.settings.defaultRR)  document.getElementById('f-rr').value  =state.settings.defaultRR;
-  // Pre-fill default fees (use != null so 0 still clears/fills correctly)
-  document.getElementById('f-commission').value = state.settings.defaultCommission ?? 0;
-  document.getElementById('f-swap').value       = state.settings.defaultSwap       ?? 0;
-  document.getElementById('f-other-fees').value = state.settings.defaultOtherFees  ?? 0;
+  // Pre-fill default fees
+  if(state.settings.defaultCommission) document.getElementById('f-commission').value=state.settings.defaultCommission;
+  if(state.settings.defaultSwap)       document.getElementById('f-swap').value=state.settings.defaultSwap;
+  if(state.settings.defaultOtherFees)  document.getElementById('f-other-fees').value=state.settings.defaultOtherFees;
   updateNetPnlDisplay();
   resetChecklistState();renderChecklist();renderMistakes();renderStrengths();setPsychValues({});
   document.getElementById('grade-letter').textContent='-';
@@ -875,7 +893,7 @@ function updateNetPnlDisplay(){
   const comm   = parseFloat(document.getElementById('f-commission')?.value)||0;
   const swap   = parseFloat(document.getElementById('f-swap')?.value)||0;
   const other  = parseFloat(document.getElementById('f-other-fees')?.value)||0;
-  const net    = gross - comm - swap - other;
+  const net    = gross - comm - (-swap) - other;
   const el     = document.getElementById('net-pnl-value');
   if(!el)return;
   if(gross===0&&comm===0&&swap===0&&other===0){el.textContent='—';el.className='net-pnl-value';return;}
@@ -1297,10 +1315,12 @@ window.deleteDailyNote=function(date){
 
 function exportJSON(){
   const data={
-    exportedAt:new Date().toISOString(),version:5,
+    exportedAt:new Date().toISOString(),version:6,
     strategy:state.strategy,trades:state.trades,
     transactions:state.transactions,dailyNotes:state.dailyNotes,
-    mistakes:state.mistakes,strengths:state.strengths,settings:state.settings,
+    weeklyNotes:state.weeklyNotes,
+    mistakes:state.mistakes,strengths:state.strengths,
+    settings:state.settings,goals:state.goals,
   };
   downloadFile(JSON.stringify(data,null,2),`trading-os-data-${todayStr()}.json`);
   notify('Full data exported as JSON.','success');
@@ -1451,6 +1471,11 @@ function importJSON(file){
         const i=state.dailyNotes.findIndex(n=>n.date===d.date);
         if(i>=0)state.dailyNotes[i]=d;else state.dailyNotes.push(d);
       });
+      (data.weeklyNotes||[]).forEach(d=>{
+        const i=state.weeklyNotes.findIndex(n=>n.weekStart===d.weekStart);
+        if(i>=0)state.weeklyNotes[i]=d;else state.weeklyNotes.push(d);
+      });
+      if(data.goals) Object.assign(state.goals, data.goals);
       if(data.strategy&&await confirm('Import strategy from file too?'))state.strategy=data.strategy;
       saveState();renderJournal();renderDashboard();
       notify(`Imported ${data.trades.length} trade(s) + ${(data.transactions||[]).length} transaction(s).`,'success');
@@ -1481,6 +1506,9 @@ function loadSettingsForm(){
   document.getElementById('s-default-commission').value = s.defaultCommission||0;
   document.getElementById('s-default-swap').value       = s.defaultSwap||0;
   document.getElementById('s-default-other-fees').value = s.defaultOtherFees||0;
+  document.getElementById('s-broker').value          = s.broker||'';
+  document.getElementById('s-account-type').value    = s.accountType||'';
+  document.getElementById('s-max-lots').value        = s.maxLots||'';
 }
 function saveSettings(){
   state.settings.startingBalance   =Number(document.getElementById('s-starting-balance').value);
@@ -1494,6 +1522,9 @@ function saveSettings(){
   state.settings.defaultCommission =Number(document.getElementById('s-default-commission').value)||0;
   state.settings.defaultSwap       =Number(document.getElementById('s-default-swap').value)||0;
   state.settings.defaultOtherFees  =Number(document.getElementById('s-default-other-fees').value)||0;
+  state.settings.broker            =document.getElementById('s-broker').value.trim();
+  state.settings.accountType       =document.getElementById('s-account-type').value.trim();
+  state.settings.maxLots           =Number(document.getElementById('s-max-lots').value)||0;
   saveState();applyTheme();notify('Settings saved.','success');
 }
 
@@ -1549,6 +1580,472 @@ function saveTrade(){
   document.getElementById('trade-form-title').textContent='Edit Trade — '+trade.pair;
 }
 function saveStrategy(){saveState();renderStrategyBuilder();notify('Strategy saved.','success');}
+
+/* ============================================================
+   SECTION 23a — RISK CALCULATOR
+   ============================================================ */
+
+let _calcResults = {};
+
+function renderCalculator(){
+  // Pre-fill balance from equity
+  const eq = computeEquityBalance();
+  const bal = document.getElementById('calc-balance');
+  if(bal && !bal.value) bal.value = eq.toFixed(2);
+  // Pre-fill risk % from settings
+  const riskPct = document.getElementById('calc-risk-pct');
+  if(riskPct && !riskPct.value) riskPct.value = state.settings.defaultRisk || 1;
+  updateCalcRiskDollar();
+}
+
+function updateCalcRiskDollar(){
+  const bal = parseFloat(document.getElementById('calc-balance')?.value)||0;
+  const pct = parseFloat(document.getElementById('calc-risk-pct')?.value)||0;
+  const dollar = bal * pct / 100;
+  const el = document.getElementById('calc-risk-dollar');
+  if(el) el.value = dollar > 0 ? dollar.toFixed(2) : '';
+}
+
+function calcPosition(){
+  const balance  = parseFloat(document.getElementById('calc-balance').value)||0;
+  const riskPct  = parseFloat(document.getElementById('calc-risk-pct').value)||0;
+  const entry    = parseFloat(document.getElementById('calc-entry').value)||0;
+  const sl       = parseFloat(document.getElementById('calc-sl').value)||0;
+  const tp       = parseFloat(document.getElementById('calc-tp').value)||0;
+  const pairType = document.getElementById('calc-pair-type').value;
+  const pipValue = parseFloat(document.getElementById('calc-pip-value').value)||0;
+
+  if(!balance||!riskPct||!entry||!sl){
+    notify('Fill in Balance, Risk %, Entry and Stop Loss at minimum.','error');return;
+  }
+
+  const riskDollar = balance * riskPct / 100;
+
+  // pip size: forex = 0.0001, gold = 0.1, indices = 1
+  const pipSize = pairType==='forex' ? 0.0001 : pairType==='gold' ? 0.1 : 1;
+
+  const slPips  = Math.abs(entry - sl) / pipSize;
+  const tpPips  = tp ? Math.abs(tp - entry) / pipSize : 0;
+  const rr      = tpPips && slPips ? tpPips / slPips : 0;
+
+  // Lot size: riskDollar / (slPips × pipValuePerLot)
+  const effectivePipValue = pipValue || (pairType==='forex' ? 10 : pairType==='gold' ? 10 : 1);
+  const lots = slPips > 0 && effectivePipValue > 0 ? riskDollar / (slPips * effectivePipValue) : 0;
+  const potentialProfit = lots * tpPips * effectivePipValue;
+
+  _calcResults = {entry, sl, tp, riskDollar, slPips, tpPips, rr, lots, potentialProfit, balance};
+
+  // Update result cards
+  setText('cr-sl-pips', slPips.toFixed(1));
+  setText('cr-tp-pips', tp ? tpPips.toFixed(1) : '—');
+  setText('cr-rr',      rr  ? '1 : ' + rr.toFixed(2) : '—');
+  setText('cr-risk-dollar', '$' + riskDollar.toFixed(2));
+  setText('cr-lots',    lots.toFixed(2));
+  setText('cr-profit',  tp  ? '+$' + potentialProfit.toFixed(2) : '—');
+
+  drawCalcCanvas(entry, sl, tp);
+  notify(`Lot size: ${lots.toFixed(2)} | RR: ${rr>0?'1:'+rr.toFixed(2):'N/A'} | Risk: $${riskDollar.toFixed(2)}`,'success');
+}
+
+function setText(id, val){
+  const el = document.getElementById(id);
+  if(el) el.textContent = val;
+}
+
+function drawCalcCanvas(entry, sl, tp){
+  const canvas = document.getElementById('calc-canvas');
+  if(!canvas) return;
+  canvas.width = canvas.offsetWidth || 600;
+  const W = canvas.width, H = 120;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  const accent  = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#2563eb';
+  const success = getComputedStyle(document.documentElement).getPropertyValue('--success').trim()||'#16a34a';
+  const danger  = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()||'#dc2626';
+  const muted   = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()||'#64748b';
+  const bg      = getComputedStyle(document.documentElement).getPropertyValue('--surface2').trim()||'#f8fafc';
+
+  // background
+  ctx.fillStyle = bg;
+  ctx.roundRect && ctx.roundRect(0,0,W,H,6);
+  ctx.fill();
+
+  const prices = [entry, sl, tp ? tp : null].filter(Boolean);
+  const minP = Math.min(...prices), maxP = Math.max(...prices);
+  const pad  = (maxP - minP) * 0.3 || 0.001;
+  const low  = minP - pad, high = maxP + pad;
+
+  const yOf = p => 12 + (H-24) * (1 - (p - low)/(high - low));
+  const xOf = label => label==='sl' ? W*0.2 : label==='entry' ? W*0.5 : W*0.8;
+
+  const drawLine = (y, color, dashed=false) => {
+    ctx.setLineDash(dashed ? [6,4] : []);
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(60, y); ctx.lineTo(W-20, y); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+
+  // SL zone fill
+  const ySL    = yOf(sl);
+  const yEntry = yOf(entry);
+  ctx.fillStyle = danger + '22';
+  ctx.fillRect(60, Math.min(ySL,yEntry), W-80, Math.abs(ySL-yEntry));
+
+  // TP zone fill
+  if(tp){
+    const yTP = yOf(tp);
+    ctx.fillStyle = success + '22';
+    ctx.fillRect(60, Math.min(yTP,yEntry), W-80, Math.abs(yTP-yEntry));
+  }
+
+  drawLine(yEntry, accent);
+  drawLine(ySL, danger, true);
+  if(tp) drawLine(yOf(tp), success, true);
+
+  // Labels
+  ctx.font = '11px system-ui'; ctx.textAlign = 'right';
+  const label = (text, y, color) => {
+    ctx.fillStyle = color;
+    ctx.fillText(text, 56, y + 4);
+  };
+  label('Entry ' + entry.toFixed(4<entry.toString().indexOf('.')?5:2), yEntry, accent);
+  label('SL ' + sl.toFixed(4<sl.toString().indexOf('.')?5:2), ySL, danger);
+  if(tp) label('TP ' + tp.toFixed(4<tp.toString().indexOf('.')?5:2), yOf(tp), success);
+}
+
+function sendCalcToTrade(){
+  if(!_calcResults.lots){notify('Calculate first.','error');return;}
+  const {entry, sl, tp, rr, lots} = _calcResults;
+  const setF = (id, val) => { const el=document.getElementById(id); if(el) el.value=val; };
+  setF('f-entry', entry);
+  setF('f-sl', sl);
+  if(tp) setF('f-tp', tp);
+  setF('f-rr', rr.toFixed(2));
+  document.getElementById('f-risk').value = document.getElementById('calc-risk-pct').value;
+  updateNetPnlDisplay();
+  switchTab('new-trade');
+  notify(`Loaded: Entry ${entry}, SL ${sl}${tp?', TP '+tp:''}, RR ${rr.toFixed(2)}. Lot size: ${lots.toFixed(2)} (enter manually).`,'success');
+}
+
+/* ============================================================
+   SECTION 23b — GOALS & LIMITS
+   ============================================================ */
+
+function loadGoalsForm(){
+  const g = state.goals;
+  const setV = (id, val) => { const el=document.getElementById(id); if(el) el.value = val||''; };
+  setV('g-monthly-target',   g.monthlyTarget);
+  setV('g-win-rate',         g.winRateTarget);
+  setV('g-avg-rr',           g.avgRrTarget);
+  setV('g-max-daily-trades', g.maxDailyTrades);
+  setV('g-max-daily-loss',   g.maxDailyLoss);
+  setV('g-max-dd',           g.maxDrawdown);
+  setV('g-max-loss-streak',  g.maxLossStreak);
+}
+
+function saveGoals(){
+  state.goals = {
+    monthlyTarget:  Number(document.getElementById('g-monthly-target').value)||0,
+    winRateTarget:  Number(document.getElementById('g-win-rate').value)||0,
+    avgRrTarget:    Number(document.getElementById('g-avg-rr').value)||0,
+    maxDailyTrades: Number(document.getElementById('g-max-daily-trades').value)||0,
+    maxDailyLoss:   Number(document.getElementById('g-max-daily-loss').value)||0,
+    maxDrawdown:    Number(document.getElementById('g-max-dd').value)||0,
+    maxLossStreak:  Number(document.getElementById('g-max-loss-streak').value)||0,
+  };
+  saveState();
+  renderGoals();
+  notify('Goals saved.','success');
+}
+
+function renderGoals(){
+  loadGoalsForm();
+  const g = state.goals;
+  const trades = state.trades;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  const todayStr2 = todayStr();
+
+  // Month trades
+  const monthTrades = trades.filter(t => (t.date||'') >= monthStart && t.outcome);
+  const monthNetPnl = monthTrades.reduce((a,t) => a + getNetPnl(t), 0);
+  const monthWins   = monthTrades.filter(t => t.outcome==='WIN').length;
+  const monthWinRate= monthTrades.length ? monthWins/monthTrades.length*100 : 0;
+  const monthAvgRR  = monthTrades.length ? monthTrades.reduce((a,t)=>a+(t.rr||0),0)/monthTrades.length : 0;
+
+  // Today trades
+  const todayTrades = trades.filter(t => t.date === todayStr2);
+  const todayLoss   = todayTrades.reduce((a,t) => a + Math.min(0, getNetPnl(t)), 0);
+  const todayCount  = todayTrades.length;
+
+  // Drawdown
+  const events = buildChronologicalEvents();
+  let runBal = state.settings.startingBalance, peak = state.settings.startingBalance, curDD = 0;
+  events.forEach(ev => {
+    if(ev.kind==='deposit')        runBal += ev.amount;
+    else if(ev.kind==='withdrawal') runBal -= ev.amount;
+    else runBal += (ev.pnl||0);
+    if(runBal > peak) peak = runBal;
+    const dd = peak > 0 ? (peak - runBal)/peak*100 : 0;
+    if(dd > curDD) curDD = dd;
+  });
+
+  // Current loss streak
+  const sorted = [...trades].filter(t=>t.outcome).sort((a,b)=>a.date.localeCompare(b.date));
+  let curLossStreak = 0;
+  for(let i=sorted.length-1;i>=0;i--){
+    if(sorted[i].outcome==='LOSS') curLossStreak++;
+    else break;
+  }
+
+  const monthLabel2 = now.toLocaleString('default',{month:'long',year:'numeric'});
+  const el = document.getElementById('goals-month-label');
+  if(el) el.textContent = monthLabel2;
+
+  const alerts = [];
+  const items  = [];
+
+  // Monthly profit
+  if(g.monthlyTarget > 0){
+    const pct = Math.min(100, monthNetPnl / g.monthlyTarget * 100);
+    const cls = pct >= 100 ? 'good' : pct >= 60 ? '' : 'warn';
+    items.push({
+      label: 'Monthly Profit Target',
+      value: `$${monthNetPnl.toFixed(2)} / $${g.monthlyTarget.toFixed(2)}`,
+      pct: Math.max(0,pct), cls,
+    });
+    if(monthNetPnl >= g.monthlyTarget) alerts.push({type:'good', msg:`🎯 Monthly profit target of $${g.monthlyTarget} reached!`});
+  }
+
+  // Win rate
+  if(g.winRateTarget > 0 && monthTrades.length > 0){
+    const pct = Math.min(100, monthWinRate / g.winRateTarget * 100);
+    items.push({
+      label: 'Monthly Win Rate',
+      value: `${monthWinRate.toFixed(1)}% / ${g.winRateTarget}%`,
+      pct: Math.max(0,pct), cls: pct>=100?'good':pct>=70?'':'warn',
+    });
+  }
+
+  // Avg RR
+  if(g.avgRrTarget > 0 && monthTrades.length > 0){
+    const pct = Math.min(100, monthAvgRR / g.avgRrTarget * 100);
+    items.push({
+      label: 'Avg RR This Month',
+      value: `${monthAvgRR.toFixed(2)} / ${g.avgRrTarget}`,
+      pct: Math.max(0,pct), cls: pct>=100?'good':pct>=70?'':'warn',
+    });
+  }
+
+  // Daily trades limit
+  if(g.maxDailyTrades > 0){
+    const pct = Math.min(100, todayCount / g.maxDailyTrades * 100);
+    const cls = pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'good';
+    items.push({
+      label: `Today's Trade Count`,
+      value: `${todayCount} / ${g.maxDailyTrades}`,
+      pct: Math.max(0,pct), cls,
+    });
+    if(todayCount >= g.maxDailyTrades)
+      alerts.push({type:'danger', msg:`🚫 Max daily trades (${g.maxDailyTrades}) reached. No more trades today.`});
+  }
+
+  // Daily loss
+  if(g.maxDailyLoss > 0){
+    const lossAbs = Math.abs(todayLoss);
+    const pct     = Math.min(100, lossAbs / g.maxDailyLoss * 100);
+    const cls     = pct >= 100 ? 'danger' : pct >= 70 ? 'warn' : 'good';
+    items.push({
+      label: 'Daily Loss',
+      value: `-$${lossAbs.toFixed(2)} / $${g.maxDailyLoss.toFixed(2)}`,
+      pct: Math.max(0,pct), cls,
+    });
+    if(lossAbs >= g.maxDailyLoss)
+      alerts.push({type:'danger', msg:`🛑 Daily loss limit of $${g.maxDailyLoss} hit. STOP TRADING TODAY.`});
+  }
+
+  // Drawdown
+  if(g.maxDrawdown > 0){
+    const pct = Math.min(100, curDD / g.maxDrawdown * 100);
+    const cls = pct >= 100 ? 'danger' : pct >= 75 ? 'warn' : 'good';
+    items.push({
+      label: 'Max Drawdown',
+      value: `${curDD.toFixed(2)}% / ${g.maxDrawdown}%`,
+      pct: Math.max(0,pct), cls,
+    });
+    if(curDD >= g.maxDrawdown)
+      alerts.push({type:'danger', msg:`⛔ Max drawdown of ${g.maxDrawdown}% breached. Review your risk immediately.`});
+  }
+
+  // Loss streak
+  if(g.maxLossStreak > 0){
+    const pct = Math.min(100, curLossStreak / g.maxLossStreak * 100);
+    const cls = pct >= 100 ? 'danger' : pct >= 60 ? 'warn' : 'good';
+    items.push({
+      label: 'Current Loss Streak',
+      value: `${curLossStreak} / ${g.maxLossStreak} consecutive`,
+      pct: Math.max(0,pct), cls,
+    });
+    if(curLossStreak >= g.maxLossStreak)
+      alerts.push({type:'danger', msg:`⚠️ ${curLossStreak} losses in a row. Step away and reset before trading again.`});
+  }
+
+  // Render progress
+  const wrap = document.getElementById('goals-progress-wrap');
+  if(wrap){
+    if(!items.length){
+      wrap.innerHTML = '<p class="text-muted" style="font-size:13px">Set at least one goal above and save to see live progress.</p>';
+    } else {
+      wrap.innerHTML = items.map(item => `
+        <div class="goal-progress-item">
+          <div class="goal-progress-header">
+            <span class="goal-progress-label">${item.label}</span>
+            <span class="goal-progress-value">${item.value}</span>
+          </div>
+          <div class="goal-bar-wrap">
+            <div class="goal-bar ${item.cls}" style="width:${item.pct}%"></div>
+          </div>
+        </div>`).join('');
+    }
+  }
+
+  // Render alerts
+  const alertSec  = document.getElementById('goals-alerts-section');
+  const alertWrap = document.getElementById('goals-alerts-wrap');
+  if(alertSec && alertWrap){
+    if(alerts.length){
+      alertSec.style.display = '';
+      alertWrap.innerHTML = alerts.map(a => `<div class="goal-alert">${a.msg}</div>`).join('');
+    } else {
+      alertSec.style.display = 'none';
+    }
+  }
+}
+
+/* ============================================================
+   SECTION 23c — WEEKLY REVIEW
+   ============================================================ */
+
+let _weeklyDate = null; // Monday ISO string of current week being viewed
+
+function getMonday(dateStr){
+  const d = dateStr ? new Date(dateStr+'T00:00:00') : new Date();
+  const day = d.getDay(); // 0=Sun
+  const diff = (day === 0) ? -6 : 1 - day; // adjust to Monday
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0,10);
+}
+
+function getSunday(mondayStr){
+  const d = new Date(mondayStr+'T00:00:00');
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0,10);
+}
+
+function renderWeeklyReview(){
+  if(!_weeklyDate) _weeklyDate = getMonday();
+  const picker = document.getElementById('weekly-pick-date');
+  if(picker) picker.value = _weeklyDate;
+  drawWeek();
+}
+
+function drawWeek(){
+  const monday = _weeklyDate;
+  const sunday = getSunday(monday);
+
+  const weekTrades = state.trades.filter(t => t.date >= monday && t.date <= sunday);
+  const completed  = weekTrades.filter(t => t.outcome);
+  const wins       = completed.filter(t => t.outcome==='WIN');
+  const losses     = completed.filter(t => t.outcome==='LOSS');
+  const netPnl     = completed.reduce((a,t) => a + getNetPnl(t), 0);
+  const grossPnl   = completed.reduce((a,t) => a + (Number(t.pnl)||0), 0);
+  const fees       = completed.reduce((a,t) => a + getTotalFees(t), 0);
+  const winRate    = completed.length ? wins.length/completed.length*100 : 0;
+  const avgRR      = completed.length ? completed.reduce((a,t)=>a+(t.rr||0),0)/completed.length : 0;
+  const avgGrades  = completed.filter(t=>t.grade).map(t=>gradeToNum(t.grade));
+  const avgGrade   = avgGrades.length ? numToGrade(avgGrades.reduce((a,b)=>a+b,0)/avgGrades.length) : '—';
+
+  // Cards
+  const cards = [
+    {label:'Total Trades',   value: weekTrades.length},
+    {label:'Win Rate',       value: completed.length ? winRate.toFixed(1)+'%' : '—'},
+    {label:'Gross P&L',      value: grossPnl?(grossPnl>=0?'+':'')+'$'+grossPnl.toFixed(2):'$0.00', cls: grossPnl>=0?'positive':'negative'},
+    {label:'Fees Paid',      value: fees>0?'-$'+fees.toFixed(2):'$0.00', cls: fees>0?'fee-value':''},
+    {label:'Net P&L',        value: netPnl?(netPnl>=0?'+':'')+'$'+netPnl.toFixed(2):'$0.00', cls: netPnl>=0?'positive':'negative'},
+    {label:'Avg RR',         value: completed.length ? avgRR.toFixed(2) : '—'},
+    {label:'Avg Grade',      value: avgGrade},
+    {label:'Wins / Losses',  value: `${wins.length}W / ${losses.length}L`},
+  ];
+  document.getElementById('weekly-stats-cards').innerHTML = cards.map(c=>`
+    <div class="dash-card">
+      <div class="dash-card-label">${c.label}</div>
+      <div class="dash-card-value ${c.cls||''}">${c.value}</div>
+    </div>`).join('');
+
+  // Trades table
+  const tableWrap = document.getElementById('weekly-trades-table');
+  if(tableWrap){
+    if(!weekTrades.length){
+      tableWrap.innerHTML = '<p class="text-muted" style="font-size:13px;padding:8px 0">No trades this week.</p>';
+    } else {
+      tableWrap.innerHTML = `<div style="overflow-x:auto"><table id="journal-table">
+        <thead><tr><th>Date</th><th>Pair</th><th>Dir</th><th>Outcome</th><th>Net P&L</th><th>RR</th><th>Grade</th><th></th></tr></thead>
+        <tbody>${weekTrades.sort((a,b)=>a.date.localeCompare(b.date)).map(t=>{
+          const bc=t.outcome==='WIN'?'badge-win':t.outcome==='LOSS'?'badge-loss':t.outcome==='BE'?'badge-be':'badge-pending';
+          const net=getNetPnl(t);
+          const netStr=net?(net>=0?`+$${net.toFixed(2)}`:`-$${Math.abs(net).toFixed(2)}`):'—';
+          return`<tr>
+            <td>${t.date}</td><td>${esc(t.pair||'—')}</td><td>${esc(t.direction||'—')}</td>
+            <td><span class="badge ${bc}">${t.outcome||'Pending'}</span></td>
+            <td class="${net>0?'positive':net<0?'negative':''} mono">${netStr}</td>
+            <td>${t.rr?t.rr.toFixed(2):'—'}</td>
+            <td>${t.grade||'—'}</td>
+            <td><button class="btn btn-sm" onclick="viewTrade('${t.id}')">View</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+    }
+  }
+
+  // Best / worst trade
+  const sortedByNet = [...completed].sort((a,b) => getNetPnl(b) - getNetPnl(a));
+  const best  = sortedByNet[0];
+  const worst = sortedByNet[sortedByNet.length-1];
+
+  const tradeBlurb = t => t
+    ? `${t.pair} ${t.direction} on ${t.date} — Net P&L: ${getNetPnl(t)>=0?'+':''}$${getNetPnl(t).toFixed(2)} | Grade: ${t.grade||'—'} | RR: ${t.rr||'—'}`
+    : 'No completed trades this week.';
+
+  const bestEl  = document.getElementById('weekly-best-trade');
+  const worstEl = document.getElementById('weekly-worst-trade');
+  if(bestEl)  bestEl.textContent  = tradeBlurb(best);
+  if(worstEl) worstEl.textContent = tradeBlurb(worst && worst!==best ? worst : null);
+
+  // Load reflection note
+  const note = state.weeklyNotes.find(n => n.weekStart === monday);
+  const ta   = document.getElementById('weekly-note-text');
+  if(ta) ta.value = note ? note.note : '';
+}
+
+function saveWeeklyNote(){
+  const note = (document.getElementById('weekly-note-text')?.value||'').trim();
+  if(!note){notify('Reflection is empty.','error');return;}
+  const idx = state.weeklyNotes.findIndex(n => n.weekStart === _weeklyDate);
+  if(idx>=0) state.weeklyNotes[idx].note = note;
+  else state.weeklyNotes.push({id:uid(), weekStart:_weeklyDate, note});
+  saveState();
+  notify('Weekly reflection saved.','success');
+}
+
+function weeklyNav(dir){
+  const d = new Date(_weeklyDate+'T00:00:00');
+  d.setDate(d.getDate() + dir * 7);
+  _weeklyDate = d.toISOString().slice(0,10);
+  const picker = document.getElementById('weekly-pick-date');
+  if(picker) picker.value = _weeklyDate;
+  drawWeek();
+}
 
 /* ============================================================
    SECTION 23 — INIT
@@ -1658,8 +2155,36 @@ function init(){
     resetTradeForm();loadSettingsForm();notify('All data cleared.','success');
   });
 
+  // ---- RISK CALCULATOR ----
+  document.getElementById('calc-balance')?.addEventListener('input', updateCalcRiskDollar);
+  document.getElementById('calc-risk-pct')?.addEventListener('input', updateCalcRiskDollar);
+  document.getElementById('calc-pair-type')?.addEventListener('change', ()=>{
+    const t = document.getElementById('calc-pair-type').value;
+    const pv = document.getElementById('calc-pip-value');
+    if(pv && !pv.value){
+      pv.value = t==='forex' ? 10 : t==='gold' ? 10 : 1;
+    }
+  });
+  document.getElementById('btn-calc-position')?.addEventListener('click', calcPosition);
+  document.getElementById('btn-calc-to-trade')?.addEventListener('click', sendCalcToTrade);
+
+  // ---- GOALS ----
+  document.getElementById('btn-save-goals')?.addEventListener('click', saveGoals);
+
+  // ---- WEEKLY REVIEW ----
+  document.getElementById('btn-save-weekly-note')?.addEventListener('click', saveWeeklyNote);
+  document.getElementById('btn-weekly-prev')?.addEventListener('click', ()=>weeklyNav(-1));
+  document.getElementById('btn-weekly-next')?.addEventListener('click', ()=>weeklyNav(1));
+  document.getElementById('weekly-pick-date')?.addEventListener('change', e=>{
+    _weeklyDate = getMonday(e.target.value);
+    drawWeek();
+  });
+
   window.addEventListener('resize',()=>{
     if(document.getElementById('tab-account')?.classList.contains('active'))renderEquityCurve();
+    if(document.getElementById('tab-calculator')?.classList.contains('active')){
+      if(_calcResults.entry) drawCalcCanvas(_calcResults.entry, _calcResults.sl, _calcResults.tp);
+    }
   });
 }
 
