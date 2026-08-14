@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Trading OS v1.6.3</title>
+  <title>Trading OS v1.7.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -100,7 +100,7 @@
     </ul>
     <div id="sidebar-footer">
       <button class="btn btn-sm btn-accent" id="btn-new-trade-quick" title="Ctrl+N">+ New Trade</button>
-      <div class="sidebar-version">v1.6.3</div>
+      <div class="sidebar-version">v1.7.0</div>
     </div>
   </nav>
 
@@ -126,8 +126,7 @@
         <p class="page-desc">Define your trading rules. The checklist in New Trade rebuilds automatically.</p>
       </div>
       <div id="strategy-toolbar" class="toolbar">
-        <button class="btn btn-sm" id="btn-add-category">+ Add Category</button>
-        <button class="btn btn-sm btn-primary" id="btn-save-strategy">Save Strategy</button>
+        <button class="btn btn-sm btn-primary" id="btn-save-strategy">Save Playbooks</button>
       </div>
       <div id="strategy-builder"></div>
     </section>
@@ -271,9 +270,11 @@
         <!-- RIGHT -->
         <div id="trade-form-right">
           <div class="form-section">
-            <h2 class="section-title">Strategy Checklist
-              <input type="text" id="checklist-search" placeholder="Search rules..." style="font-weight:400;text-transform:none;letter-spacing:0;margin-left:8px;width:140px;font-size:12px"/>
-            </h2>
+            <h2 class="section-title">Strategy Checklist</h2>
+            <div class="checklist-toolbar">
+              <select id="checklist-playbook-select" title="Active playbook for this trade" style="font-size:12px;min-width:160px"></select>
+              <input type="text" id="checklist-search" placeholder="Search rules..." style="font-size:12px;flex:1"/>
+            </div>
             <div id="checklist-progress-bar-wrap">
               <div id="checklist-progress-bar"></div>
               <span id="checklist-progress-text">0%</span>
@@ -333,7 +334,7 @@
         <table id="journal-table">
           <thead>
             <tr>
-              <th>Date</th><th>Pair</th><th>Dir</th><th>Outcome</th>
+              <th>Date</th><th>Pair</th><th>Dir</th><th>Playbook</th><th>Outcome</th>
               <th>Gross P&amp;L</th><th>Fees</th><th>Net P&amp;L</th><th>RR</th><th>Grade</th><th>Actions</th>
             </tr>
           </thead>

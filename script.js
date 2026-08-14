@@ -1,5 +1,13 @@
 /* ============================================================
-   TRADING OS — script.js  v1.6.3
+   TRADING OS — script.js  v1.7.0
+
+   NEW vs v1.6.3:
+   - Multiple Playbooks: unlimited named strategy sets (Normal, News Release, etc.)
+   - Playbook selector on New Trade form — switch active checklist per trade
+   - Rule Follow-ups: per-rule sub-questions that appear when rule is checked
+     e.g. "Imbalance" → "Thick / Thin / Blended"; "Zone depth" → "No penetration / Deep"
+   - Follow-up answers saved per trade and shown in Journal detail view
+   - Strategy Builder rebuilt with playbook tabs + follow-up editor per rule
 
    NEW vs v1.5:
    - Risk / Position Size Calculator with visual trade diagram
@@ -26,38 +34,90 @@
    SECTION 1 — DEFAULT CONFIG
    ============================================================ */
 
-const DEFAULT_STRATEGY = [
-  { id:'htf', name:'Higher Timeframe Analysis', rules:[
-    { id:'htf1', name:'Weekly bias identified',  desc:'Determine overall weekly trend direction', weight:10, required:true  },
-    { id:'htf2', name:'Daily bias aligned',      desc:'Daily chart confirms weekly direction',    weight:10, required:true  },
-    { id:'htf3', name:'H4 bias aligned',         desc:'H4 structure supports daily bias',         weight:8,  required:false },
-  ]},
-  { id:'zone', name:'Zone Rules', rules:[
-    { id:'z1', name:'Weekly Zone Identified', desc:'Price left the zone impulsively.',                             weight:10, required:true  },
-    { id:'z2', name:'Daily Zone Confirmed',   desc:'Daily zone aligns with the weekly zone, left impulsively.',   weight:10, required:true  },
-    { id:'z3', name:'Fresh Zone',             desc:'Zone has not been significantly tapped before.',              weight:8,  required:false },
-    { id:'z4', name:'No Deep Penetration',    desc:'Price has not penetrated more than 50% into the zone.',      weight:7,  required:false },
-  ]},
-  { id:'confirmation', name:'Confirmation Rules', rules:[
-    { id:'c1', name:'Absorption / Accumulation',           desc:'Evidence of absorption before the move.',            weight:8,  required:false },
-    { id:'c2', name:'Engulfing Candle',                    desc:'Strong engulfing candle confirms momentum.',          weight:10, required:true  },
-    { id:'c3', name:'LTF Change in Structure',             desc:'Market structure changes in the trade direction.',    weight:10, required:true  },
-    { id:'c4', name:'Liquidity Sweep / False Tap',         desc:'Liquidity is taken before the move.',                weight:8,  required:false },
-    { id:'c5', name:'50 EMA Retest',                       desc:'Price retests the 50 EMA before entry.',             weight:9,  required:true  },
-  ]},
-  { id:'risk', name:'Risk Rules', rules:[
-    { id:'r1', name:'SL below/above structure', desc:'Stop loss placed beyond key structure.',  weight:10, required:true },
-    { id:'r2', name:'Min 1:2 RR',               desc:'Reward must be at least twice the risk.', weight:10, required:true },
-  ]},
-  { id:'news', name:'News Rules', rules:[
-    { id:'n1', name:'No red-folder news within 30min', desc:'Avoid high-impact news events.',    weight:8, required:false },
-    { id:'n2', name:'News checked on Forex Factory',   desc:'Verified on economic calendar.',     weight:5, required:false },
-  ]},
-  { id:'psychology', name:'Psychology Rules', rules:[
-    { id:'p1', name:'Not revenge trading',   desc:'No previous loss in last 30 minutes.', weight:9, required:true  },
-    { id:'p2', name:'Mental state is clear', desc:'Stress and fatigue are acceptable.',   weight:7, required:false },
-    { id:'p3', name:'No FOMO detected',      desc:'Entry is planned, not chased.',        weight:8, required:true  },
-  ]},
+// Each playbook = { id, name, categories: [ {id, name, rules: [{id, name, desc, weight, required, followUps:[{id,question,options:[str]}]}] } ] }
+const DEFAULT_PLAYBOOKS = [
+  {
+    id:'pb-normal', name:'Normal Trade',
+    categories:[
+      { id:'htf', name:'Higher Timeframe Analysis', rules:[
+        { id:'htf1', name:'Weekly bias identified',  desc:'Determine overall weekly trend direction', weight:10, required:true,  followUps:[] },
+        { id:'htf2', name:'Daily bias aligned',      desc:'Daily chart confirms weekly direction',    weight:10, required:true,  followUps:[] },
+        { id:'htf3', name:'H4 bias aligned',         desc:'H4 structure supports daily bias',         weight:8,  required:false, followUps:[] },
+      ]},
+      { id:'zone', name:'Zone Rules', rules:[
+        { id:'z1', name:'Weekly Zone Identified', desc:'Price left the zone impulsively.', weight:10, required:true, followUps:[
+          {id:'z1fu1', question:'Zone type?', options:['Demand Zone','Supply Zone','Order Block','Breaker Block']},
+        ]},
+        { id:'z2', name:'Daily Zone Confirmed',   desc:'Daily zone aligns with the weekly zone, left impulsively.', weight:10, required:true,  followUps:[] },
+        { id:'z3', name:'Imbalance Present',      desc:'A fair value gap or imbalance exists in the zone.',        weight:8,  required:false, followUps:[
+          {id:'z3fu1', question:'Imbalance type?', options:['Thick Imbalance','Thin Imbalance','Blended']},
+          {id:'z3fu2', question:'Zone penetration?', options:['No deep penetration','Deep penetration (<50%)','Penetrated (>50%)']},
+        ]},
+        { id:'z4', name:'Fresh Zone',             desc:'Zone has not been significantly tapped before.',           weight:8,  required:false, followUps:[
+          {id:'z4fu1', question:'Previous taps?', options:['Untouched','Tapped once','Tapped twice']},
+        ]},
+      ]},
+      { id:'confirmation', name:'Confirmation Rules', rules:[
+        { id:'c1', name:'Absorption / Accumulation', desc:'Evidence of absorption before the move.',         weight:8,  required:false, followUps:[
+          {id:'c1fu1', question:'Absorption signal?', options:['Long wicks','Doji cluster','Inside bars']},
+        ]},
+        { id:'c2', name:'Engulfing Candle',           desc:'Strong engulfing candle confirms momentum.',      weight:10, required:true,  followUps:[
+          {id:'c2fu1', question:'Engulf size?', options:['Small engulf','Clean engulf','Massive engulf']},
+        ]},
+        { id:'c3', name:'LTF Change in Structure',    desc:'Market structure changes in trade direction.',    weight:10, required:true,  followUps:[] },
+        { id:'c4', name:'Liquidity Sweep / False Tap',desc:'Liquidity is taken before the move.',            weight:8,  required:false, followUps:[] },
+        { id:'c5', name:'50 EMA Retest',              desc:'Price retests the 50 EMA before entry.',         weight:9,  required:true,  followUps:[] },
+      ]},
+      { id:'risk', name:'Risk Rules', rules:[
+        { id:'r1', name:'SL below/above structure', desc:'Stop loss placed beyond key structure.',  weight:10, required:true,  followUps:[] },
+        { id:'r2', name:'Min 1:2 RR',               desc:'Reward must be at least twice the risk.', weight:10, required:true, followUps:[] },
+      ]},
+      { id:'news', name:'News Rules', rules:[
+        { id:'n1', name:'No red-folder news within 30min', desc:'Avoid high-impact news events.', weight:8, required:false, followUps:[] },
+        { id:'n2', name:'News checked on Forex Factory',   desc:'Verified on economic calendar.',  weight:5, required:false, followUps:[] },
+      ]},
+      { id:'psychology', name:'Psychology Rules', rules:[
+        { id:'p1', name:'Not revenge trading',   desc:'No previous loss in last 30 minutes.', weight:9, required:true,  followUps:[] },
+        { id:'p2', name:'Mental state is clear', desc:'Stress and fatigue are acceptable.',   weight:7, required:false, followUps:[] },
+        { id:'p3', name:'No FOMO detected',      desc:'Entry is planned, not chased.',        weight:8, required:true,  followUps:[] },
+      ]},
+    ],
+  },
+  {
+    id:'pb-news', name:'News Release',
+    categories:[
+      { id:'nr-pre', name:'Pre-News Setup', rules:[
+        { id:'nr1', name:'News event identified',       desc:'Know exact time and currency affected.', weight:10, required:true, followUps:[
+          {id:'nr1fu1', question:'Impact level?', options:['Red Folder (High)','Orange Folder (Medium)','Yellow Folder (Low)']},
+        ]},
+        { id:'nr2', name:'Consensus vs Previous noted',desc:'Compare forecast to previous reading.',   weight:8,  required:true,  followUps:[] },
+        { id:'nr3', name:'Key levels marked',           desc:'S/R, round numbers, prior highs/lows.',  weight:9,  required:true,  followUps:[] },
+        { id:'nr4', name:'Position sized for news vol', desc:'Reduced size due to spread widening.',   weight:10, required:true,  followUps:[
+          {id:'nr4fu1', question:'Size adjustment?', options:['Full size','Half size','Quarter size','Micro size']},
+        ]},
+      ]},
+      { id:'nr-entry', name:'Entry Rules', rules:[
+        { id:'ne1', name:'Wait for initial spike',     desc:'Do not enter before candle closes.',  weight:10, required:true,  followUps:[
+          {id:'ne1fu1', question:'Entry timing?', options:['On spike candle close','Retest after spike','Fade the move']},
+        ]},
+        { id:'ne2', name:'Direction confirmed by data',desc:'Actual print beats/misses forecast.',  weight:10, required:true,  followUps:[
+          {id:'ne2fu1', question:'Data result?', options:['Beat forecast','Missed forecast','In-line with forecast','Revised prior higher','Revised prior lower']},
+        ]},
+        { id:'ne3', name:'No counter-trend entry',    desc:'Only trade in direction of surprise.',  weight:8,  required:false, followUps:[] },
+      ]},
+      { id:'nr-risk', name:'Risk Management', rules:[
+        { id:'nrr1', name:'Hard SL placed before entry', desc:'No naked entries during news.',      weight:10, required:true,  followUps:[] },
+        { id:'nrr2', name:'Target realistic for event',  desc:'TP within expected move range.',      weight:8,  required:true,  followUps:[
+          {id:'nrr2fu1', question:'Exit strategy?', options:['Single TP','Partial at 1R / rest runs','Trail after 2R']},
+        ]},
+        { id:'nrr3', name:'Spread checked pre-news',     desc:'Confirm spread acceptable.',         weight:7,  required:false, followUps:[] },
+      ]},
+      { id:'nr-psych', name:'Psychology', rules:[
+        { id:'np1', name:'No FOMO on initial move',  desc:'Patient — wait for setup, not chase.', weight:9, required:true,  followUps:[] },
+        { id:'np2', name:'Accepted outcome regardless', desc:'Win or loss — process was correct.', weight:7, required:false, followUps:[] },
+      ]},
+    ],
+  },
 ];
 
 const DEFAULT_MISTAKES = [
@@ -97,7 +157,7 @@ const DEFAULT_GOALS = {
 const DB_KEY = 'tradingOS_v1';
 
 let state = {
-  strategy:    DEFAULT_STRATEGY,
+  playbooks:   DEFAULT_PLAYBOOKS,   // replaces old 'strategy'
   trades:      [],
   transactions:[], // {id, type:'deposit'|'withdrawal', date, amount, note}
   dailyNotes:  [], // {id, date, note}
@@ -113,8 +173,16 @@ function loadState(){
     const raw=localStorage.getItem(DB_KEY);
     if(raw){
       const s=JSON.parse(raw);
+      // Migrate old flat 'strategy' array → single playbook
+      let playbooks = s.playbooks ?? null;
+      if(!playbooks && s.strategy){
+        playbooks = [{id:'pb-migrated', name:'My Strategy', categories: s.strategy}];
+      }
+      playbooks = playbooks ?? DEFAULT_PLAYBOOKS;
+      // Ensure all rules have followUps array (migration safety)
+      playbooks.forEach(pb=>pb.categories.forEach(cat=>cat.rules.forEach(r=>{if(!r.followUps)r.followUps=[];})));
       state={
-        strategy:    s.strategy     ?? DEFAULT_STRATEGY,
+        playbooks,
         trades:      s.trades       ?? [],
         transactions:s.transactions ?? [],
         dailyNotes:  s.dailyNotes   ?? [],
@@ -624,128 +692,327 @@ window.deleteTransaction=async function(id){
 };
 
 /* ============================================================
-   SECTION 10 — STRATEGY BUILDER
+   SECTION 10 — STRATEGY BUILDER  (v1.7 — multiple playbooks)
    ============================================================ */
 
+let _activePbIdx = 0; // which playbook tab is open in builder
+
 function renderStrategyBuilder(){
-  const c=document.getElementById('strategy-builder');
-  c.innerHTML='';
-  state.strategy.forEach((cat,ci)=>{
-    const el=document.createElement('div');
-    el.className='strategy-category';
-    el.innerHTML=`
-      <div class="strategy-cat-header">
-        <input class="strategy-cat-name" type="text" value="${esc(cat.name)}" data-cat-idx="${ci}" placeholder="Category name"/>
-        <button class="btn btn-sm btn-danger" data-del-cat="${ci}">✕ Remove</button>
-      </div>
-      <div class="strategy-rules-list">
-        ${cat.rules.map((r,ri)=>renderRuleRow(ci,ri,r)).join('')}
-      </div>
-      <div class="strategy-add-rule">
-        <button class="btn btn-sm" data-add-rule="${ci}">+ Add Rule</button>
-      </div>`;
-    c.appendChild(el);
+  const wrap = document.getElementById('strategy-builder');
+  wrap.innerHTML = '';
+
+  // ---- Playbook tab bar ----
+  const tabBar = document.createElement('div');
+  tabBar.className = 'pb-tab-bar';
+  state.playbooks.forEach((pb, pbi) => {
+    const tab = document.createElement('button');
+    tab.className = 'pb-tab' + (pbi === _activePbIdx ? ' active' : '');
+    tab.textContent = pb.name;
+    tab.addEventListener('click', () => { _activePbIdx = pbi; renderStrategyBuilder(); });
+    tabBar.appendChild(tab);
   });
-  c.querySelectorAll('.strategy-cat-name').forEach(inp=>{
-    inp.addEventListener('change',e=>{state.strategy[+e.target.dataset.catIdx].name=e.target.value.trim();});
+  const addPbBtn = document.createElement('button');
+  addPbBtn.className = 'btn btn-sm';
+  addPbBtn.textContent = '+ New Playbook';
+  addPbBtn.addEventListener('click', () => {
+    state.playbooks.push({id: uid(), name: 'New Playbook', categories: []});
+    _activePbIdx = state.playbooks.length - 1;
+    renderStrategyBuilder();
   });
-  c.querySelectorAll('[data-del-cat]').forEach(btn=>{
-    btn.addEventListener('click',async e=>{
-      const i=+e.currentTarget.dataset.delCat;
-      if(await confirm(`Remove category "${state.strategy[i].name}"?`)){state.strategy.splice(i,1);renderStrategyBuilder();}
+  tabBar.appendChild(addPbBtn);
+  wrap.appendChild(tabBar);
+
+  const pb = state.playbooks[_activePbIdx];
+  if(!pb) return;
+
+  // ---- Playbook header ----
+  const pbHeader = document.createElement('div');
+  pbHeader.className = 'pb-header';
+  pbHeader.innerHTML = `
+    <input class="pb-name-input" type="text" value="${esc(pb.name)}" placeholder="Playbook name"/>
+    <button class="btn btn-sm btn-danger" id="btn-del-playbook">✕ Delete Playbook</button>`;
+  wrap.appendChild(pbHeader);
+
+  pbHeader.querySelector('.pb-name-input').addEventListener('change', e => {
+    state.playbooks[_activePbIdx].name = e.target.value.trim();
+    renderStrategyBuilder();
+  });
+  pbHeader.querySelector('#btn-del-playbook').addEventListener('click', async () => {
+    if(state.playbooks.length <= 1){ notify('You must keep at least one playbook.','error'); return; }
+    if(!await confirm(`Delete playbook "${pb.name}"? This cannot be undone.`)) return;
+    state.playbooks.splice(_activePbIdx, 1);
+    _activePbIdx = Math.max(0, _activePbIdx - 1);
+    renderStrategyBuilder();
+  });
+
+  // ---- Categories ----
+  pb.categories.forEach((cat, ci) => {
+    const catEl = document.createElement('div');
+    catEl.className = 'strategy-category';
+
+    const header = document.createElement('div');
+    header.className = 'strategy-cat-header';
+    header.innerHTML = `
+      <input class="strategy-cat-name" type="text" value="${esc(cat.name)}" placeholder="Category name"/>
+      <button class="btn btn-sm btn-danger">✕ Remove Category</button>`;
+    header.querySelector('input').addEventListener('change', e => { cat.name = e.target.value.trim(); });
+    header.querySelector('button').addEventListener('click', async () => {
+      if(await confirm(`Remove category "${cat.name}"?`)){ pb.categories.splice(ci,1); renderStrategyBuilder(); }
     });
-  });
-  c.querySelectorAll('[data-add-rule]').forEach(btn=>{
-    btn.addEventListener('click',e=>{
-      state.strategy[+e.currentTarget.dataset.addRule].rules.push({id:uid(),name:'New Rule',desc:'',weight:5,required:false});
+    catEl.appendChild(header);
+
+    const rulesList = document.createElement('div');
+    rulesList.className = 'strategy-rules-list';
+    cat.rules.forEach((rule, ri) => {
+      rulesList.appendChild(buildRuleEditor(pb, ci, cat, ri, rule));
+    });
+    catEl.appendChild(rulesList);
+
+    const addRule = document.createElement('div');
+    addRule.className = 'strategy-add-rule';
+    const addRuleBtn = document.createElement('button');
+    addRuleBtn.className = 'btn btn-sm';
+    addRuleBtn.textContent = '+ Add Rule';
+    addRuleBtn.addEventListener('click', () => {
+      cat.rules.push({id:uid(), name:'New Rule', desc:'', weight:5, required:false, followUps:[]});
       renderStrategyBuilder();
     });
+    addRule.appendChild(addRuleBtn);
+    catEl.appendChild(addRule);
+
+    wrap.appendChild(catEl);
   });
-  c.querySelectorAll('[data-rule-field]').forEach(inp=>{
-    inp.addEventListener('change',e=>{
-      const{catIdx,rIdx,field}=e.target.dataset;
-      let v=e.target.type==='number'?Number(e.target.value):e.target.value;
-      if(field==='required')v=(v==='true');
-      state.strategy[+catIdx].rules[+rIdx][field]=v;
-    });
+
+  // Add category button
+  const addCatDiv = document.createElement('div');
+  addCatDiv.style.cssText = 'margin-top:8px';
+  const addCatBtn = document.createElement('button');
+  addCatBtn.className = 'btn btn-sm';
+  addCatBtn.textContent = '+ Add Category';
+  addCatBtn.addEventListener('click', () => {
+    pb.categories.push({id:uid(), name:'New Category', rules:[]});
+    renderStrategyBuilder();
   });
-  c.querySelectorAll('[data-del-rule]').forEach(btn=>{
-    btn.addEventListener('click',e=>{
-      const{catIdx,rIdx}=e.currentTarget.dataset;
-      state.strategy[+catIdx].rules.splice(+rIdx,1);renderStrategyBuilder();
-    });
-  });
+  addCatDiv.appendChild(addCatBtn);
+  wrap.appendChild(addCatDiv);
 }
 
-function renderRuleRow(ci,ri,rule){
-  return`<div class="strategy-rule">
-    <input type="text" data-rule-field data-cat-idx="${ci}" data-r-idx="${ri}" data-field="name"
-      value="${esc(rule.name)}" placeholder="Rule name"/>
-    <input type="text" data-rule-field data-cat-idx="${ci}" data-r-idx="${ri}" data-field="desc"
-      value="${esc(rule.desc)}" placeholder="Description"/>
-    <input type="number" data-rule-field data-cat-idx="${ci}" data-r-idx="${ri}" data-field="weight"
-      value="${rule.weight}" min="1" max="10" style="width:60px" title="Weight 1-10"/>
-    <select data-rule-field data-cat-idx="${ci}" data-r-idx="${ri}" data-field="required" style="width:90px">
+function buildRuleEditor(pb, ci, cat, ri, rule){
+  const wrap = document.createElement('div');
+  wrap.className = 'strategy-rule-block';
+
+  // Main rule row
+  const row = document.createElement('div');
+  row.className = 'strategy-rule';
+  row.innerHTML = `
+    <input type="text" value="${esc(rule.name)}" placeholder="Rule name"/>
+    <input type="text" value="${esc(rule.desc)}" placeholder="Description (optional)"/>
+    <input type="number" value="${rule.weight}" min="1" max="10" style="width:60px" title="Weight 1–10"/>
+    <select style="width:94px">
       <option value="false" ${!rule.required?'selected':''}>Optional</option>
       <option value="true"  ${ rule.required?'selected':''}>Required</option>
     </select>
-    <button class="strategy-rule-delete" data-del-rule data-cat-idx="${ci}" data-r-idx="${ri}">✕</button>
-  </div>`;
+    <button class="btn btn-sm" title="Add follow-up question to this rule">+ Follow-up</button>
+    <button class="strategy-rule-delete" title="Delete rule">✕</button>`;
+
+  const [nameInp, descInp, weightInp, reqSel, addFuBtn, delBtn] = row.querySelectorAll('input, input, input, select, button, button');
+  nameInp.addEventListener('change',   e => { rule.name     = e.target.value.trim(); });
+  descInp.addEventListener('change',   e => { rule.desc     = e.target.value.trim(); });
+  weightInp.addEventListener('change', e => { rule.weight   = Number(e.target.value); });
+  reqSel.addEventListener('change',    e => { rule.required = e.target.value === 'true'; });
+  delBtn.addEventListener('click', async () => {
+    if(await confirm(`Delete rule "${rule.name}"?`)){ cat.rules.splice(ri,1); renderStrategyBuilder(); }
+  });
+  addFuBtn.addEventListener('click', () => {
+    if(!rule.followUps) rule.followUps = [];
+    rule.followUps.push({id:uid(), question:'', options:['Option A','Option B']});
+    renderStrategyBuilder();
+  });
+  wrap.appendChild(row);
+
+  // Follow-up editors
+  if(rule.followUps && rule.followUps.length){
+    const fuWrap = document.createElement('div');
+    fuWrap.className = 'follow-up-editor-list';
+
+    rule.followUps.forEach((fu, fui) => {
+      const fuRow = document.createElement('div');
+      fuRow.className = 'follow-up-editor-row';
+      fuRow.innerHTML = `
+        <span class="fu-arrow">↳</span>
+        <input class="fu-question" type="text" value="${esc(fu.question)}" placeholder="Follow-up question (e.g. Imbalance type?)"/>
+        <input class="fu-options"  type="text" value="${esc(fu.options.join(' | '))}" placeholder="Options separated by  |  e.g. Thick | Thin | Blended"/>
+        <button class="strategy-rule-delete" title="Delete follow-up">✕</button>`;
+
+      fuRow.querySelector('.fu-question').addEventListener('change', e => { fu.question = e.target.value.trim(); });
+      fuRow.querySelector('.fu-options').addEventListener('change', e => {
+        fu.options = e.target.value.split('|').map(s => s.trim()).filter(Boolean);
+      });
+      fuRow.querySelector('button').addEventListener('click', () => {
+        rule.followUps.splice(fui, 1);
+        renderStrategyBuilder();
+      });
+      fuWrap.appendChild(fuRow);
+    });
+    wrap.appendChild(fuWrap);
+  }
+
+  return wrap;
 }
 
 /* ============================================================
-   SECTION 11 — CHECKLIST
+   SECTION 11 — CHECKLIST  (v1.7 — playbook-aware + follow-ups)
    ============================================================ */
 
-let _checklistState={};
+let _checklistState    = {};  // { ruleId: true|false }
+let _followUpState     = {};  // { followUpId: selectedOption|'' }
+let _activeChecklistPb = 0;   // index into state.playbooks
+
+function getActivePlaybook(){
+  return state.playbooks[_activeChecklistPb] ?? state.playbooks[0];
+}
+
+function renderPlaybookSelector(){
+  const sel = document.getElementById('checklist-playbook-select');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = state.playbooks.map((pb,i) =>
+    `<option value="${i}" ${i===_activeChecklistPb?'selected':''}>${esc(pb.name)}</option>`
+  ).join('');
+  if(cur !== '') sel.value = cur;
+}
 
 function resetChecklistState(){
-  _checklistState={};
-  state.strategy.forEach(cat=>cat.rules.forEach(r=>{_checklistState[r.id]=false;}));
+  _checklistState = {};
+  _followUpState  = {};
+  state.playbooks.forEach(pb =>
+    pb.categories.forEach(cat =>
+      cat.rules.forEach(r => {
+        _checklistState[r.id] = false;
+        (r.followUps||[]).forEach(fu => { _followUpState[fu.id] = ''; });
+      })
+    )
+  );
 }
 
 function renderChecklist(q=''){
-  const c=document.getElementById('checklist-container');c.innerHTML='';
-  const qL=(q||document.getElementById('checklist-search').value||'').toLowerCase();
-  state.strategy.forEach(cat=>{
-    const rules=cat.rules.filter(r=>!qL||r.name.toLowerCase().includes(qL)||r.desc.toLowerCase().includes(qL));
-    if(!rules.length)return;
-    const catEl=document.createElement('div');catEl.className='checklist-category';
-    const hdr=document.createElement('div');hdr.className='checklist-cat-header';
-    hdr.innerHTML=`<span class="checklist-cat-name">${esc(cat.name)}</span><span class="checklist-cat-toggle">▾</span>`;
-    const items=document.createElement('div');items.className='checklist-items';
-    rules.forEach(rule=>{
-      const lbl=document.createElement('label');lbl.className='checklist-item';
-      lbl.innerHTML=`
+  renderPlaybookSelector();
+  const pb = getActivePlaybook();
+  const c  = document.getElementById('checklist-container');
+  c.innerHTML = '';
+  const qL = (q || document.getElementById('checklist-search')?.value || '').toLowerCase();
+
+  pb.categories.forEach(cat => {
+    const rules = cat.rules.filter(r =>
+      !qL || r.name.toLowerCase().includes(qL) || (r.desc||'').toLowerCase().includes(qL)
+    );
+    if(!rules.length) return;
+
+    const catEl = document.createElement('div');
+    catEl.className = 'checklist-category';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'checklist-cat-header';
+    hdr.innerHTML = `<span class="checklist-cat-name">${esc(cat.name)}</span><span class="checklist-cat-toggle">▾</span>`;
+
+    const items = document.createElement('div');
+    items.className = 'checklist-items';
+
+    rules.forEach(rule => {
+      // Main rule checkbox
+      const ruleWrap = document.createElement('div');
+      ruleWrap.className = 'checklist-rule-wrap';
+
+      const lbl = document.createElement('label');
+      lbl.className = 'checklist-item';
+      lbl.innerHTML = `
         <input type="checkbox" data-rule-id="${rule.id}" ${_checklistState[rule.id]?'checked':''}/>
         <span class="checklist-item-label">
           <span class="checklist-item-name">${esc(rule.name)}${rule.required?' <span class="checklist-item-required">*</span>':''}</span>
           ${rule.desc?`<span class="checklist-item-desc">${esc(rule.desc)}</span>`:''}
         </span>`;
-      items.appendChild(lbl);
+      ruleWrap.appendChild(lbl);
+
+      // Follow-up questions (shown when rule is checked)
+      if(rule.followUps && rule.followUps.length){
+        const fuContainer = document.createElement('div');
+        fuContainer.className = 'follow-up-container';
+        fuContainer.style.display = _checklistState[rule.id] ? '' : 'none';
+
+        rule.followUps.forEach(fu => {
+          if(!fu.question || !fu.options?.length) return;
+          const fuRow = document.createElement('div');
+          fuRow.className = 'follow-up-row';
+
+          const fuLabel = document.createElement('span');
+          fuLabel.className = 'follow-up-label';
+          fuLabel.textContent = '↳ ' + fu.question;
+          fuRow.appendChild(fuLabel);
+
+          fu.options.forEach(opt => {
+            const optBtn = document.createElement('button');
+            optBtn.className = 'follow-up-option' + (_followUpState[fu.id]===opt ? ' selected' : '');
+            optBtn.textContent = opt;
+            optBtn.type = 'button';
+            optBtn.addEventListener('click', () => {
+              // Toggle: click selected → deselect
+              _followUpState[fu.id] = _followUpState[fu.id]===opt ? '' : opt;
+              renderChecklist(q);
+            });
+            fuRow.appendChild(optBtn);
+          });
+
+          fuContainer.appendChild(fuRow);
+        });
+
+        lbl.querySelector('input').addEventListener('change', e => {
+          _checklistState[rule.id] = e.target.checked;
+          fuContainer.style.display = e.target.checked ? '' : 'none';
+          if(!e.target.checked){
+            (rule.followUps||[]).forEach(fu => { _followUpState[fu.id] = ''; });
+          }
+          updateChecklistProgress();
+        });
+
+        ruleWrap.appendChild(fuContainer);
+      } else {
+        lbl.querySelector('input').addEventListener('change', e => {
+          _checklistState[rule.id] = e.target.checked;
+          updateChecklistProgress();
+        });
+      }
+
+      items.appendChild(ruleWrap);
     });
-    catEl.appendChild(hdr);catEl.appendChild(items);c.appendChild(catEl);
-    hdr.addEventListener('click',()=>{
-      const open=items.style.display!=='none';
-      items.style.display=open?'none':'';
-      hdr.querySelector('.checklist-cat-toggle').textContent=open?'▸':'▾';
+
+    catEl.appendChild(hdr);
+    catEl.appendChild(items);
+    c.appendChild(catEl);
+
+    hdr.addEventListener('click', () => {
+      const open = items.style.display !== 'none';
+      items.style.display = open ? 'none' : '';
+      hdr.querySelector('.checklist-cat-toggle').textContent = open ? '▸' : '▾';
     });
   });
-  c.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
-    cb.addEventListener('change',e=>{_checklistState[e.target.dataset.ruleId]=e.target.checked;updateChecklistProgress();});
-  });
+
   updateChecklistProgress();
 }
 
 function updateChecklistProgress(){
-  const all=state.strategy.flatMap(c=>c.rules);
-  const pct=all.length?Math.round(all.filter(r=>_checklistState[r.id]).length/all.length*100):0;
-  document.getElementById('checklist-progress-bar').style.width=pct+'%';
-  document.getElementById('checklist-progress-text').textContent=pct+'%';
+  const pb  = getActivePlaybook();
+  const all = pb.categories.flatMap(c => c.rules);
+  const pct = all.length ? Math.round(all.filter(r => _checklistState[r.id]).length / all.length * 100) : 0;
+  const bar = document.getElementById('checklist-progress-bar');
+  const txt = document.getElementById('checklist-progress-text');
+  if(bar) bar.style.width = pct + '%';
+  if(txt) txt.textContent = pct + '%';
 }
+
 function getChecklistPct(){
-  const all=state.strategy.flatMap(c=>c.rules);
-  return all.length?Math.round(all.filter(r=>_checklistState[r.id]).length/all.length*100):0;
+  const pb  = getActivePlaybook();
+  const all = pb.categories.flatMap(c => c.rules);
+  return all.length ? Math.round(all.filter(r => _checklistState[r.id]).length / all.length * 100) : 0;
 }
 
 /* ============================================================
@@ -831,6 +1098,7 @@ function resetTradeForm(){
   if(state.settings.defaultSwap)       document.getElementById('f-swap').value=state.settings.defaultSwap;
   if(state.settings.defaultOtherFees)  document.getElementById('f-other-fees').value=state.settings.defaultOtherFees;
   updateNetPnlDisplay();
+  _activeChecklistPb = 0;
   resetChecklistState();renderChecklist();renderMistakes();renderStrengths();setPsychValues({});
   document.getElementById('grade-letter').textContent='-';
   document.getElementById('grade-reason').textContent='';
@@ -851,8 +1119,15 @@ function loadTradeIntoForm(trade){
   set('swap',       trade.swap??'');
   set('other-fees', trade.otherFees??'');
   updateNetPnlDisplay();
+  // Restore active playbook
+  if(trade.playbookId){
+    const pbIdx = state.playbooks.findIndex(pb => pb.id === trade.playbookId);
+    if(pbIdx >= 0) _activeChecklistPb = pbIdx;
+  }
+  renderPlaybookSelector();
   resetChecklistState();
-  if(trade.checklist)Object.assign(_checklistState,trade.checklist);
+  if(trade.checklist)    Object.assign(_checklistState, trade.checklist);
+  if(trade.followUpAnswers) Object.assign(_followUpState, trade.followUpAnswers);
   renderChecklist();setPsychValues(trade.psych||{});
   renderMistakes(trade.mistakes||[]);renderStrengths(trade.strengths||[]);
   if(trade.grade){
@@ -885,6 +1160,9 @@ function readTradeForm(){
     psych,psychScore:computePsychScore(psych),
     mistakes:getChecked('mistake'),strengths:getChecked('strength'),
     checklist:{..._checklistState},checklistPct:getChecklistPct(),
+    followUpAnswers:{..._followUpState},
+    playbookId: getActivePlaybook()?.id ?? '',
+    playbookName: getActivePlaybook()?.name ?? '',
   };
 }
 
@@ -931,7 +1209,8 @@ function calculateGrade(trade){
   const clScore=Math.round(clPct*0.40);
   score+=clScore;
   reasons.push(`Checklist: ${clPct}% complete (${clScore}/40 pts)`);
-  const reqMissed=state.strategy.flatMap(c=>c.rules).filter(r=>r.required&&!trade.checklist?.[r.id]);
+  const pb=state.playbooks.find(p=>p.id===trade.playbookId)??getActivePlaybook();
+  const reqMissed=(pb?.categories??[]).flatMap(c=>c.rules).filter(r=>r.required&&!trade.checklist?.[r.id]);
   if(reqMissed.length){const p=reqMissed.length*5;score-=p;reasons.push(`${reqMissed.length} required rule(s) missed: -${p} pts`);}
   const ps=trade.psychScore??computePsychScore(trade.psych??{});
   const psScore=Math.round(ps*2);score+=psScore;
@@ -1020,6 +1299,7 @@ function renderJournalPage(){
     return`<tr>
       <td>${t.date||'—'} ${t.time||''}</td>
       <td>${esc(t.pair||'—')}</td><td>${esc(t.direction||'—')}</td>
+      <td><span class="badge-playbook">${esc(t.playbookName||'—')}</span></td>
       <td><span class="badge ${bc}">${t.outcome||'Pending'}</span></td>
       <td class="${grossCls} mono">${grossStr}</td>
       <td class="fee-cell">${feesStr}</td>
@@ -1315,8 +1595,8 @@ window.deleteDailyNote=function(date){
 
 function exportJSON(){
   const data={
-    exportedAt:new Date().toISOString(),version:6,
-    strategy:state.strategy,trades:state.trades,
+    exportedAt:new Date().toISOString(),version:7,
+    playbooks:state.playbooks,trades:state.trades,
     transactions:state.transactions,dailyNotes:state.dailyNotes,
     weeklyNotes:state.weeklyNotes,
     mistakes:state.mistakes,strengths:state.strengths,
@@ -1476,7 +1756,9 @@ function importJSON(file){
         if(i>=0)state.weeklyNotes[i]=d;else state.weeklyNotes.push(d);
       });
       if(data.goals) Object.assign(state.goals, data.goals);
-      if(data.strategy&&await confirm('Import strategy from file too?'))state.strategy=data.strategy;
+      if(data.playbooks&&await confirm('Import playbooks from file too?'))state.playbooks=data.playbooks;
+      else if(data.strategy&&await confirm('Import strategy (old format) as a playbook?'))
+        state.playbooks=[{id:uid(),name:'Imported',categories:data.strategy}];
       saveState();renderJournal();renderDashboard();
       notify(`Imported ${data.trades.length} trade(s) + ${(data.transactions||[]).length} transaction(s).`,'success');
     }catch(err){notify('Failed to import: '+err.message,'error');}
@@ -1579,7 +1861,7 @@ function saveTrade(){
   notify(`Trade saved! Grade: ${trade.grade}${feeNote}`,'success');
   document.getElementById('trade-form-title').textContent='Edit Trade — '+trade.pair;
 }
-function saveStrategy(){saveState();renderStrategyBuilder();notify('Strategy saved.','success');}
+function saveStrategy(){saveState();renderStrategyBuilder();notify('Playbooks saved.','success');}
 
 /* ============================================================
    SECTION 23a — RISK CALCULATOR
@@ -2061,12 +2343,14 @@ function init(){
   });
 
   // Strategy
-  document.getElementById('btn-add-category').addEventListener('click',()=>{
-    state.strategy.push({id:uid(),name:'New Category',rules:[]});renderStrategyBuilder();
-  });
   document.getElementById('btn-save-strategy').addEventListener('click',saveStrategy);
 
   // Checklist
+  document.getElementById('checklist-playbook-select')?.addEventListener('change', e => {
+    _activeChecklistPb = Number(e.target.value);
+    resetChecklistState();
+    renderChecklist();
+  });
   document.getElementById('checklist-search').addEventListener('input',e=>renderChecklist(e.target.value));
 
   // Screenshot
@@ -2149,8 +2433,8 @@ function init(){
   document.getElementById('btn-backup').addEventListener('click',backupAll);
   document.getElementById('btn-clear-all').addEventListener('click',async()=>{
     if(!await confirm('Clear ALL data? This cannot be undone.'))return;
-    state={strategy:DEFAULT_STRATEGY,trades:[],transactions:[],dailyNotes:[],
-      settings:{...DEFAULT_SETTINGS},mistakes:[...DEFAULT_MISTAKES],strengths:[...DEFAULT_STRENGTHS]};
+    state={playbooks:DEFAULT_PLAYBOOKS,trades:[],transactions:[],dailyNotes:[],weeklyNotes:[],
+      settings:{...DEFAULT_SETTINGS},goals:{...DEFAULT_GOALS},mistakes:[...DEFAULT_MISTAKES],strengths:[...DEFAULT_STRENGTHS]};
     saveState();applyTheme();renderDashboard();renderStrategyBuilder();
     resetTradeForm();loadSettingsForm();notify('All data cleared.','success');
   });
