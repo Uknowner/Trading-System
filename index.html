@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Trading OS v1.7.0</title>
+  <title>Trading OS v1.8.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
@@ -100,7 +101,7 @@
     </ul>
     <div id="sidebar-footer">
       <button class="btn btn-sm btn-accent" id="btn-new-trade-quick" title="Ctrl+N">+ New Trade</button>
-      <div class="sidebar-version">v1.7.0</div>
+      <div class="sidebar-version">v1.8.0</div>
     </div>
   </nav>
 
@@ -327,6 +328,7 @@
         <button class="btn btn-sm" id="btn-export-json">Export JSON</button>
         <button class="btn btn-sm" id="btn-import-json">Import JSON</button>
         <input type="file" id="import-file-input" accept=".json" class="hidden"/>
+        <button class="btn btn-sm btn-primary" id="btn-export-xlsx">⬇ Export Excel (.xlsx)</button>
         <button class="btn btn-sm" id="btn-export-csv">Export Trades CSV</button>
         <button class="btn btn-sm" id="btn-export-site-zip">⬇ Download Site ZIP</button>
       </div>

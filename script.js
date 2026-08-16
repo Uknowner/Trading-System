@@ -1,5 +1,5 @@
 /* ============================================================
-   TRADING OS — script.js  v1.7.0
+   TRADING OS — script.js  v1.8.0
 
    NEW vs v1.6.3:
    - Multiple Playbooks: unlimited named strategy sets (Normal, News Release, etc.)
@@ -1590,7 +1590,7 @@ window.deleteDailyNote=function(date){
 };
 
 /* ============================================================
-   SECTION 19 — IMPORT / EXPORT
+   SECTION 19 — IMPORT / EXPORT  (v1.8 — proper XLSX multi-sheet)
    ============================================================ */
 
 function exportJSON(){
@@ -1606,34 +1606,535 @@ function exportJSON(){
   notify('Full data exported as JSON.','success');
 }
 
+/* ---- XLSX helpers ---- */
+function xlsxCell(v, type='s'){
+  // type: s=string, n=number, b=boolean
+  if(v===null||v===undefined||v==='') return {t:'s',v:''};
+  if(type==='n' && !isNaN(Number(v))) return {t:'n',v:Number(v)};
+  return {t:'s',v:String(v)};
+}
+
+function buildSheetFromRows(headers, rows){
+  // headers: [{label, key?, width}]  rows: array of arrays (raw values)
+  const ws = {};
+  const range = {s:{r:0,c:0}, e:{r:rows.length, c:headers.length-1}};
+
+  // Header row
+  headers.forEach((h,c)=>{
+    const addr = XLSX.utils.encode_cell({r:0,c});
+    ws[addr] = {
+      t:'s', v:h.label,
+      s:{
+        font:{bold:true, color:{rgb:'FFFFFF'}, sz:11},
+        fill:{fgColor:{rgb:'1E3A5F'}},
+        alignment:{horizontal:'center', wrapText:true},
+        border:{
+          bottom:{style:'medium', color:{rgb:'2563EB'}},
+        }
+      }
+    };
+  });
+
+  // Data rows
+  rows.forEach((row, r)=>{
+    const rowIdx = r + 1;
+    const isEven = r % 2 === 0;
+    row.forEach((val, c)=>{
+      const addr = XLSX.utils.encode_cell({r:rowIdx, c});
+      const raw  = val?.raw ?? val;
+      const type = val?.type ?? (typeof raw === 'number' ? 'n' : 's');
+      const fmt  = val?.fmt;
+      const style = val?.style ?? {};
+
+      // Base alternating row fill
+      const baseFill = isEven ? 'F8FAFC' : 'FFFFFF';
+
+      ws[addr] = {
+        t: type === 'n' ? 'n' : 's',
+        v: raw === null || raw === undefined ? '' : raw,
+        s: {
+          fill: {fgColor:{rgb: style.fill ?? baseFill}},
+          font: {
+            sz: 10,
+            bold: style.bold ?? false,
+            color: {rgb: style.color ?? '0F172A'},
+          },
+          alignment: {horizontal: style.align ?? 'left', wrapText: false},
+          border: {
+            bottom:{style:'thin', color:{rgb:'E2E8F0'}},
+            right: {style:'hair', color:{rgb:'E2E8F0'}},
+          },
+          ...(fmt ? {numFmt: fmt} : {}),
+        }
+      };
+    });
+  });
+
+  ws['!ref'] = XLSX.utils.encode_range(range);
+  ws['!cols'] = headers.map(h => ({wch: h.width ?? 14}));
+  ws['!rows'] = [{hpt:20}].concat(rows.map(()=>({hpt:18})));
+  return ws;
+}
+
+/* outcome color helper */
+function outcomeStyle(outcome){
+  if(outcome==='WIN')  return {fill:'D1FAE5', color:'065F46', bold:true};
+  if(outcome==='LOSS') return {fill:'FEE2E2', color:'991B1B', bold:true};
+  if(outcome==='BE')   return {fill:'FEF3C7', color:'92400E', bold:true};
+  return {fill:'F1F5F9', color:'475569'};
+}
+function pnlStyle(val){
+  if(val > 0) return {fill:'D1FAE5', color:'065F46', bold:true, align:'right'};
+  if(val < 0) return {fill:'FEE2E2', color:'991B1B', bold:true, align:'right'};
+  return {align:'right'};
+}
+function gradeStyle(g){
+  const m={'A+':'10B981','A':'10B981','A-':'34D399','B+':'60A5FA','B':'60A5FA','B-':'93C5FD',
+           'C':'FBBF24','D':'F97316','F':'EF4444'};
+  return m[g] ? {fill:m[g]+'33', color:m[g], bold:true, align:'center'} : {align:'center'};
+}
+function feeStyle(val){
+  if(val > 0) return {color:'7C3AED', align:'right'};
+  return {align:'right'};
+}
+
+/* ============================================================
+   Sheet 1 — TRADES
+   ============================================================ */
+function buildTradesSheet(){
+  const headers = [
+    {label:'#',              width:5},
+    {label:'Date',           width:12},
+    {label:'Time',           width:8},
+    {label:'Pair',           width:10},
+    {label:'Direction',      width:10},
+    {label:'Playbook',       width:16},
+    {label:'Session',        width:14},
+    {label:'HTF Bias',       width:10},
+    {label:'Entry TF',       width:9},
+    {label:'Entry Price',    width:12},
+    {label:'Stop Loss',      width:12},
+    {label:'Take Profit',    width:12},
+    {label:'Risk %',         width:8},
+    {label:'R:R',            width:8},
+    {label:'Duration',       width:10},
+    {label:'News',           width:8},
+    {label:'Outcome',        width:10},
+    {label:'Gross P&L ($)',  width:14},
+    {label:'Commission ($)', width:14},
+    {label:'Swap ($)',       width:10},
+    {label:'Other Fees ($)', width:14},
+    {label:'Total Fees ($)', width:14},
+    {label:'Net P&L ($)',    width:14},
+    {label:'Grade',          width:8},
+    {label:'Checklist %',   width:12},
+    {label:'Psych Score',    width:12},
+    {label:'Mistakes',       width:28},
+    {label:'Strengths',      width:28},
+    {label:'Tags',           width:20},
+    {label:'Notes',          width:40},
+  ];
+
+  const sorted = [...state.trades].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const rows = sorted.map((t, i)=>{
+    const gross    = Number(t.pnl)||0;
+    const fees     = getTotalFees(t);
+    const net      = getNetPnl(t);
+    const oStyle   = outcomeStyle(t.outcome);
+    const dirStyle = t.direction==='BUY'
+      ? {fill:'DBEAFE', color:'1D4ED8', bold:true, align:'center'}
+      : {fill:'FCE7F3', color:'BE185D', bold:true, align:'center'};
+
+    return [
+      {raw:i+1,        type:'n', style:{align:'center', color:'64748B'}},
+      {raw:t.date||'', style:{align:'center'}},
+      {raw:t.time||'', style:{align:'center', color:'64748B'}},
+      {raw:t.pair||'', style:{bold:true}},
+      {raw:t.direction||'', style:dirStyle},
+      {raw:t.playbookName||'', style:{color:'2563EB'}},
+      {raw:t.session||'', style:{color:'64748B'}},
+      {raw:t.htf||'',    style:{color:'64748B'}},
+      {raw:t.ltf||'',    style:{color:'64748B'}},
+      {raw:t.entry||'',  type:t.entry?'n':'s'},
+      {raw:t.sl||'',     type:t.sl?'n':'s'},
+      {raw:t.tp||'',     type:t.tp?'n':'s'},
+      {raw:t.risk||'',   type:t.risk?'n':'s', style:{align:'right'}},
+      {raw:t.rr||'',     type:t.rr?'n':'s',   style:{align:'right'}},
+      {raw:t.duration||''},
+      {raw:t.news||'',   style:{align:'center'}},
+      {raw:t.outcome||'Pending', style:oStyle},
+      {raw:gross, type:'n', style:pnlStyle(gross), fmt:'#,##0.00'},
+      {raw:Number(t.commission)||0, type:'n', style:feeStyle(Number(t.commission)||0), fmt:'#,##0.00'},
+      {raw:Number(t.swap)||0,       type:'n', style:{align:'right'}, fmt:'#,##0.00'},
+      {raw:Number(t.otherFees)||0,  type:'n', style:feeStyle(Number(t.otherFees)||0), fmt:'#,##0.00'},
+      {raw:fees, type:'n', style:feeStyle(fees), fmt:'#,##0.00'},
+      {raw:net,  type:'n', style:pnlStyle(net),  fmt:'#,##0.00'},
+      {raw:t.grade||'', style:gradeStyle(t.grade)},
+      {raw:t.checklistPct??'', type:t.checklistPct!=null?'n':'s', style:{align:'center'}},
+      {raw:t.psychScore??'',   type:t.psychScore!=null?'n':'s',   style:{align:'center'}},
+      {raw:(t.mistakes||[]).join(', ')},
+      {raw:(t.strengths||[]).join(', ')},
+      {raw:(t.tags||[]).join(', ')},
+      {raw:t.notes||''},
+    ];
+  });
+
+  return buildSheetFromRows(headers, rows);
+}
+
+/* ============================================================
+   Sheet 2 — ACCOUNT / TRANSACTIONS
+   ============================================================ */
+function buildAccountSheet(){
+  const headers = [
+    {label:'#',             width:5},
+    {label:'Date',          width:12},
+    {label:'Type',          width:14},
+    {label:'Amount ($)',    width:14},
+    {label:'Cash Balance After ($)', width:22},
+    {label:'Note',          width:30},
+  ];
+
+  const sorted = [...state.transactions].sort((a,b)=>a.date.localeCompare(b.date));
+  let running  = state.settings.startingBalance;
+  const rows   = sorted.map((t,i)=>{
+    running += t.type==='deposit' ? t.amount : -t.amount;
+    const isDeposit = t.type==='deposit';
+    const tStyle    = isDeposit
+      ? {fill:'D1FAE5', color:'065F46', bold:true, align:'center'}
+      : {fill:'FEE2E2', color:'991B1B', bold:true, align:'center'};
+    const aStyle = isDeposit
+      ? {fill:'D1FAE5', color:'065F46', bold:true, align:'right'}
+      : {fill:'FEE2E2', color:'991B1B', bold:true, align:'right'};
+    return [
+      {raw:i+1, type:'n', style:{align:'center', color:'64748B'}},
+      {raw:t.date,                                              style:{align:'center'}},
+      {raw:t.type==='deposit'?'Deposit':'Withdrawal',           style:tStyle},
+      {raw:t.amount, type:'n',                                  style:aStyle,         fmt:'#,##0.00'},
+      {raw:running,  type:'n',                                  style:{align:'right'}, fmt:'#,##0.00'},
+      {raw:t.note||''},
+    ];
+  });
+
+  const ws = buildSheetFromRows(headers, rows);
+
+  // Summary block below transactions
+  const offset = rows.length + 3;
+  const summaryRows = [
+    ['Starting Balance', state.settings.startingBalance],
+    ['Total Deposited',  sorted.filter(t=>t.type==='deposit').reduce((a,t)=>a+t.amount,0)],
+    ['Total Withdrawn',  sorted.filter(t=>t.type==='withdrawal').reduce((a,t)=>a+t.amount,0)],
+    ['Cash Balance',     computeCashBalance()],
+    ['Net Trading P&L',  computeTradingPnl()],
+    ['Equity Balance',   computeEquityBalance()],
+    ['Total Fees Paid',  state.trades.reduce((a,t)=>a+getTotalFees(t),0)],
+  ];
+  summaryRows.forEach(([label, val], i)=>{
+    const r = offset + i;
+    ws[XLSX.utils.encode_cell({r, c:0})] = {t:'s', v:label,
+      s:{font:{bold:true, sz:10}, fill:{fgColor:{rgb:'EFF6FF'}},
+         border:{bottom:{style:'thin',color:{rgb:'BFDBFE'}}}}};
+    ws[XLSX.utils.encode_cell({r, c:1})] = {t:'n', v:val,
+      s:{font:{bold:true, sz:10, color:{rgb: val>=0?'065F46':'991B1B'}},
+         fill:{fgColor:{rgb:'EFF6FF'}}, numFmt:'#,##0.00',
+         alignment:{horizontal:'right'},
+         border:{bottom:{style:'thin',color:{rgb:'BFDBFE'}}}}};
+  });
+  ws['!ref'] = XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:offset+summaryRows.length, c:headers.length-1}});
+  return ws;
+}
+
+/* ============================================================
+   Sheet 3 — STATISTICS
+   ============================================================ */
+function buildStatsSheet(){
+  const trades = state.trades.filter(t=>t.outcome);
+  const ws = {};
+  let rowCursor = 0;
+
+  const writeTitle = (title)=>{
+    ws[XLSX.utils.encode_cell({r:rowCursor,c:0})] = {
+      t:'s', v:title,
+      s:{font:{bold:true, sz:12, color:{rgb:'1E3A5F'}},
+         fill:{fgColor:{rgb:'DBEAFE'}},
+         alignment:{horizontal:'left'}}
+    };
+    rowCursor++;
+  };
+
+  const writeHeader = (cols)=>{
+    cols.forEach((col, c)=>{
+      ws[XLSX.utils.encode_cell({r:rowCursor,c})] = {
+        t:'s', v:col,
+        s:{font:{bold:true, sz:10, color:{rgb:'FFFFFF'}},
+           fill:{fgColor:{rgb:'1E3A5F'}},
+           alignment:{horizontal:'center'}}
+      };
+    });
+    rowCursor++;
+  };
+
+  const writeRow = (vals, isEven)=>{
+    vals.forEach((val,c)=>{
+      const raw   = val?.raw ?? val;
+      const style = val?.style ?? {};
+      const base  = isEven ? 'F8FAFC' : 'FFFFFF';
+      ws[XLSX.utils.encode_cell({r:rowCursor,c})] = {
+        t: typeof raw === 'number' ? 'n' : 's',
+        v: raw ?? '',
+        s:{
+          fill:{fgColor:{rgb: style.fill ?? base}},
+          font:{sz:10, bold:style.bold??false, color:{rgb:style.color??'0F172A'}},
+          alignment:{horizontal:style.align??'left'},
+          border:{bottom:{style:'thin',color:{rgb:'E2E8F0'}}},
+          ...(val?.fmt ? {numFmt:val.fmt} : {}),
+        }
+      };
+    });
+    rowCursor++;
+  };
+
+  const statCols = ['Group','Trades','Wins','Losses','Win Rate','Gross P&L','Fees','Net P&L','Avg R:R'];
+
+  const writeGroup = (title, groups)=>{
+    writeTitle(title);
+    writeHeader(statCols);
+    Object.entries(groups).forEach(([key, arr], i)=>{
+      const wins    = arr.filter(t=>t.outcome==='WIN').length;
+      const losses  = arr.filter(t=>t.outcome==='LOSS').length;
+      const wr      = arr.length ? (wins/arr.length*100) : 0;
+      const gross   = arr.reduce((a,t)=>a+(t.pnl||0),0);
+      const fees    = arr.reduce((a,t)=>a+getTotalFees(t),0);
+      const net     = arr.reduce((a,t)=>a+getNetPnl(t),0);
+      const avgRR   = arr.length ? arr.reduce((a,t)=>a+(t.rr||0),0)/arr.length : 0;
+      writeRow([
+        {raw:key, style:{bold:true}},
+        {raw:arr.length, type:'n', style:{align:'center'}},
+        {raw:wins,   type:'n', style:{fill:'D1FAE5', color:'065F46', align:'center'}},
+        {raw:losses, type:'n', style:{fill:'FEE2E2', color:'991B1B', align:'center'}},
+        {raw:wr/100, type:'n', fmt:'0.0%', style:{align:'center', bold:true}},
+        {raw:gross,  type:'n', fmt:'#,##0.00', style:pnlStyle(gross)},
+        {raw:fees,   type:'n', fmt:'#,##0.00', style:{color:'7C3AED', align:'right'}},
+        {raw:net,    type:'n', fmt:'#,##0.00', style:pnlStyle(net)},
+        {raw:avgRR,  type:'n', fmt:'0.00',     style:{align:'center'}},
+      ], i%2===0);
+    });
+    rowCursor++; // blank spacer
+  };
+
+  if(trades.length){
+    writeGroup('By Pair',        groupByKey(trades,'pair'));
+    writeGroup('By Session',     groupByKey(trades,'session'));
+    writeGroup('By Day of Week', groupByFn(trades,t=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(t.date).getDay()]));
+    writeGroup('By HTF Bias',    groupByKey(trades,'htf'));
+    writeGroup('By Grade',       groupByKey(trades,'grade'));
+    writeGroup('By Playbook',    groupByKey(trades,'playbookName'));
+    writeGroup('By Outcome',     groupByKey(trades,'outcome'));
+
+    // Monthly summary
+    const monthly = {};
+    trades.forEach(t=>{
+      const m=(t.date||'').slice(0,7); if(!m)return;
+      if(!monthly[m]) monthly[m]={gross:0,net:0,fees:0,wins:0,losses:0,be:0,trades:0,rrs:[]};
+      monthly[m].gross+=t.pnl||0; monthly[m].net+=getNetPnl(t); monthly[m].fees+=getTotalFees(t);
+      monthly[m].trades++;
+      if(t.outcome==='WIN')monthly[m].wins++;else if(t.outcome==='LOSS')monthly[m].losses++;else monthly[m].be++;
+      if(t.rr) monthly[m].rrs.push(t.rr);
+    });
+    writeTitle('Monthly Summary');
+    writeHeader(['Month','Trades','Wins','Losses','BE','Win Rate','Gross P&L','Fees','Net P&L','Avg R:R','Cumulative Net']);
+    let cum=0;
+    Object.keys(monthly).sort().forEach((m,i)=>{
+      const d=monthly[m]; cum+=d.net;
+      const wr=d.trades?(d.wins/d.trades):0;
+      const avgRR=d.rrs.length?d.rrs.reduce((a,b)=>a+b,0)/d.rrs.length:0;
+      writeRow([
+        {raw:monthLabel(m), style:{bold:true}},
+        {raw:d.trades, type:'n', style:{align:'center'}},
+        {raw:d.wins,   type:'n', style:{fill:'D1FAE5',color:'065F46',align:'center'}},
+        {raw:d.losses, type:'n', style:{fill:'FEE2E2',color:'991B1B',align:'center'}},
+        {raw:d.be,     type:'n', style:{fill:'FEF3C7',color:'92400E',align:'center'}},
+        {raw:wr,       type:'n', fmt:'0.0%', style:{align:'center',bold:true}},
+        {raw:d.gross,  type:'n', fmt:'#,##0.00', style:pnlStyle(d.gross)},
+        {raw:d.fees,   type:'n', fmt:'#,##0.00', style:{color:'7C3AED',align:'right'}},
+        {raw:d.net,    type:'n', fmt:'#,##0.00', style:pnlStyle(d.net)},
+        {raw:avgRR,    type:'n', fmt:'0.00', style:{align:'center'}},
+        {raw:cum,      type:'n', fmt:'#,##0.00', style:pnlStyle(cum)},
+      ], i%2===0);
+    });
+  } else {
+    ws[XLSX.utils.encode_cell({r:0,c:0})] = {t:'s',v:'No completed trades yet.'};
+  }
+
+  ws['!ref'] = XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:rowCursor+1, c:10}});
+  ws['!cols'] = [18,10,8,8,8,10,14,12,14,10,16].map(w=>({wch:w}));
+  return ws;
+}
+
+/* ============================================================
+   Sheet 4 — FEES
+   ============================================================ */
+function buildFeesSheet(){
+  const trades = state.trades;
+  const headers = [
+    {label:'#',              width:5},
+    {label:'Date',           width:12},
+    {label:'Pair',           width:10},
+    {label:'Direction',      width:10},
+    {label:'Playbook',       width:16},
+    {label:'Outcome',        width:10},
+    {label:'Gross P&L ($)',  width:14},
+    {label:'Commission ($)', width:14},
+    {label:'Swap Cost ($)',  width:13},
+    {label:'Other Fees ($)', width:13},
+    {label:'Total Fees ($)', width:14},
+    {label:'Net P&L ($)',    width:14},
+    {label:'Fee % of Gross', width:16},
+  ];
+
+  const sorted = [...trades].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const rows = sorted.map((t,i)=>{
+    const gross   = Number(t.pnl)||0;
+    const fees    = getTotalFees(t);
+    const net     = getNetPnl(t);
+    const feePct  = gross!==0 ? fees/Math.abs(gross) : 0;
+    return [
+      {raw:i+1, type:'n', style:{align:'center',color:'64748B'}},
+      {raw:t.date||'', style:{align:'center'}},
+      {raw:t.pair||'', style:{bold:true}},
+      {raw:t.direction||'', style:{
+        ...(t.direction==='BUY'?{fill:'DBEAFE',color:'1D4ED8'}:{fill:'FCE7F3',color:'BE185D'}),
+        bold:true, align:'center'}},
+      {raw:t.playbookName||'', style:{color:'2563EB'}},
+      {raw:t.outcome||'Pending', style:outcomeStyle(t.outcome)},
+      {raw:gross, type:'n', fmt:'#,##0.00', style:pnlStyle(gross)},
+      {raw:Number(t.commission)||0, type:'n', fmt:'#,##0.00', style:{color:'7C3AED',align:'right'}},
+      {raw:Math.max(0,-Number(t.swap)||0), type:'n', fmt:'#,##0.00', style:{color:'7C3AED',align:'right'}},
+      {raw:Number(t.otherFees)||0,  type:'n', fmt:'#,##0.00', style:{color:'7C3AED',align:'right'}},
+      {raw:fees, type:'n', fmt:'#,##0.00', style:{color:'7C3AED',bold:true,align:'right'}},
+      {raw:net,  type:'n', fmt:'#,##0.00', style:pnlStyle(net)},
+      {raw:feePct, type:'n', fmt:'0.0%', style:{align:'center', color: feePct>0.1?'991B1B':'065F46'}},
+    ];
+  });
+
+  return buildSheetFromRows(headers, rows);
+}
+
+/* ============================================================
+   Sheet 5 — DAILY NOTES
+   ============================================================ */
+function buildNotesSheet(){
+  const headers = [
+    {label:'Date',  width:14},
+    {label:'Notes', width:90},
+  ];
+  const sorted = [...state.dailyNotes].sort((a,b)=>a.date.localeCompare(b.date));
+  const rows = sorted.map(n=>[
+    {raw:n.date, style:{align:'center', bold:true}},
+    {raw:n.note||''},
+  ]);
+  const ws = buildSheetFromRows(headers, rows);
+  // Enable text wrap for notes column
+  ws['!cols'] = [{wch:14},{wch:90}];
+  return ws;
+}
+
+/* ============================================================
+   MAIN XLSX EXPORT
+   ============================================================ */
+function exportXLSX(){
+  if(typeof XLSX === 'undefined'){
+    notify('Excel library not loaded yet. Check your internet connection and try again.','error');
+    return;
+  }
+  notify('Building Excel workbook…','info');
+
+  try{
+    const wb = XLSX.utils.book_new();
+    wb.Props = {
+      Title:'Trading OS Export',
+      Author:'Trading OS v1.7.0',
+      CreatedDate: new Date(),
+    };
+
+    XLSX.utils.book_append_sheet(wb, buildTradesSheet(),   'Trades');
+    XLSX.utils.book_append_sheet(wb, buildAccountSheet(),  'Account');
+    XLSX.utils.book_append_sheet(wb, buildStatsSheet(),    'Statistics');
+    XLSX.utils.book_append_sheet(wb, buildFeesSheet(),     'Fees');
+    if(state.dailyNotes.length)
+      XLSX.utils.book_append_sheet(wb, buildNotesSheet(),  'Daily Notes');
+
+    XLSX.writeFile(wb, `Trading-OS-${todayStr()}.xlsx`);
+    notify(`Excel exported — ${state.trades.length} trades across 5 sheets.`,'success');
+  } catch(e){
+    console.error('XLSX export error:',e);
+    notify('Export failed: '+e.message,'error');
+  }
+}
+
+/* ============================================================
+   CSV FALLBACK EXPORT (properly structured)
+   ============================================================ */
 function exportCSV(){
-  const cols=['id','date','time','pair','direction','session','htf','ltf',
-    'entry','sl','tp','risk','rr','outcome','pnl','commission','swap','otherFees',
-    'duration','news','tags','grade','checklistPct','psychScore','mistakes','strengths','notes'];
-  const hdr=cols.join(',');
-  const rows=state.trades.map(t=>cols.map(c=>{
-    let v=t[c];
-    if(Array.isArray(v))v=v.join('; ');
-    if(v===undefined||v===null)v='';
-    return`"${String(v).replace(/"/g,'""')}"`;
-  }).join(','));
-  downloadFile([hdr,...rows].join('\n'),`trading-os-trades-${todayStr()}.csv`,'text/csv');
-  notify('Trades exported as CSV.','success');
+  const sorted = [...state.trades].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+
+  const COLS = [
+    {header:'#',               fn:(t,i)=>i+1},
+    {header:'Date',            fn:t=>t.date||''},
+    {header:'Time',            fn:t=>t.time||''},
+    {header:'Pair',            fn:t=>t.pair||''},
+    {header:'Direction',       fn:t=>t.direction||''},
+    {header:'Playbook',        fn:t=>t.playbookName||''},
+    {header:'Session',         fn:t=>t.session||''},
+    {header:'HTF Bias',        fn:t=>t.htf||''},
+    {header:'Entry TF',        fn:t=>t.ltf||''},
+    {header:'Entry Price',     fn:t=>t.entry||''},
+    {header:'Stop Loss',       fn:t=>t.sl||''},
+    {header:'Take Profit',     fn:t=>t.tp||''},
+    {header:'Risk %',          fn:t=>t.risk||''},
+    {header:'R:R',             fn:t=>t.rr||''},
+    {header:'Duration',        fn:t=>t.duration||''},
+    {header:'News',            fn:t=>t.news||''},
+    {header:'Outcome',         fn:t=>t.outcome||'Pending'},
+    {header:'Gross P&L ($)',   fn:t=>Number(t.pnl)||0},
+    {header:'Commission ($)',  fn:t=>Number(t.commission)||0},
+    {header:'Swap ($)',        fn:t=>Number(t.swap)||0},
+    {header:'Other Fees ($)',  fn:t=>Number(t.otherFees)||0},
+    {header:'Total Fees ($)',  fn:t=>getTotalFees(t)},
+    {header:'Net P&L ($)',     fn:t=>getNetPnl(t)},
+    {header:'Grade',           fn:t=>t.grade||''},
+    {header:'Checklist %',     fn:t=>t.checklistPct??''},
+    {header:'Psych Score',     fn:t=>t.psychScore??''},
+    {header:'Mistakes',        fn:t=>(t.mistakes||[]).join('; ')},
+    {header:'Strengths',       fn:t=>(t.strengths||[]).join('; ')},
+    {header:'Tags',            fn:t=>(t.tags||[]).join('; ')},
+    {header:'Notes',           fn:t=>t.notes||''},
+    {header:'Emotion Notes',   fn:t=>t.emotionNotes||''},
+    {header:'Screenshot URL',  fn:t=>t.screenshot||''},
+  ];
+
+  const q = v => `"${String(v).replace(/"/g,'""')}"`;
+  const hdr = COLS.map(c=>q(c.header)).join(',');
+  const dataRows = sorted.map((t,i)=>COLS.map(c=>q(c.fn(t,i))).join(','));
+  downloadFile([hdr,...dataRows].join('\r\n'), `Trading-OS-Trades-${todayStr()}.csv`, 'text/csv;charset=utf-8;');
+  notify('Trades CSV exported — each field in its own column.','success');
 }
 
 function exportTransactionsCSV(){
   if(!state.transactions.length){notify('No transactions to export.','error');return;}
-  const cols=['id','date','type','amount','note'];
-  let running=state.settings.startingBalance;
   const sorted=[...state.transactions].sort((a,b)=>a.date.localeCompare(b.date));
-  const hdr=cols.join(',')+',balance_after';
+  const q = v=>`"${String(v??'').replace(/"/g,'""')}"`;
+  const hdr=[
+    'Date','Type','Amount ($)','Cash Balance After ($)','Note'
+  ].map(q).join(',');
+  let running=state.settings.startingBalance;
   const rows=sorted.map(t=>{
     running+=t.type==='deposit'?t.amount:-t.amount;
-    const base=cols.map(c=>`"${String(t[c]??'').replace(/"/g,'""')}"`).join(',');
-    return base+`,"${running.toFixed(2)}"`;
+    return [t.date, t.type==='deposit'?'Deposit':'Withdrawal',
+      Number(t.amount).toFixed(2), running.toFixed(2), t.note||''].map(q).join(',');
   });
-  downloadFile([hdr,...rows].join('\n'),`trading-os-transactions-${todayStr()}.csv`,'text/csv');
-  notify('Transactions exported as CSV.','success');
+  downloadFile([hdr,...rows].join('\r\n'),`Trading-OS-Transactions-${todayStr()}.csv`,'text/csv;charset=utf-8;');
+  notify('Transactions CSV exported.','success');
 }
 
 function exportSiteZip(){
@@ -1644,15 +2145,15 @@ function exportSiteZip(){
   const fetchText = url => url ? fetch(url).then(r=>r.text()).catch(()=>'') : Promise.resolve('');
   Promise.all([fetchText(cssHref), fetchText(jsHref)]).then(([cssText, jsText])=>{
     const files = [
-      {name:'trading-os-v1.5/index.html', data: htmlContent},
-      {name:'trading-os-v1.5/style.css',  data: cssText},
-      {name:'trading-os-v1.5/script.js',  data: jsText},
+      {name:'trading-os-v1.8.0/index.html', data: htmlContent},
+      {name:'trading-os-v1.8.0/style.css',  data: cssText},
+      {name:'trading-os-v1.8.0/script.js',  data: jsText},
     ];
     const zip = buildZip(files);
     const blob = new Blob([zip], {type:'application/zip'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `trading-os-v1.5-${todayStr()}.zip`;
+    a.download = `trading-os-v1.8.0-${todayStr()}.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
     notify('Site ZIP downloaded! Extract and open index.html.','success');
@@ -2404,6 +2905,7 @@ function init(){
 
   // Export / Import
   document.getElementById('btn-export-json').addEventListener('click',exportJSON);
+  document.getElementById('btn-export-xlsx').addEventListener('click',exportXLSX);
   document.getElementById('btn-export-csv').addEventListener('click',exportCSV);
   document.getElementById('btn-export-site-zip').addEventListener('click',exportSiteZip);
   document.getElementById('btn-import-json').addEventListener('click',()=>document.getElementById('import-file-input').click());
