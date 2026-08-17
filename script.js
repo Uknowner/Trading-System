@@ -1,5 +1,15 @@
 /* ============================================================
-   TRADING OS — script.js  v1.8.0
+   TRADING OS — script.js  v1.9.0
+
+   NEW vs v1.8.0:
+   - Risk Calculator is now fully LIVE — every keystroke auto-calculates
+   - Results (SL pips, TP pips, RR, lot size, profit) update instantly
+   - New Trade form auto-filled in the background as you type:
+     Entry, SL, TP, RR, Risk %, and Direction all set automatically
+   - Direction auto-detected: SL < Entry → BUY, SL > Entry → SELL
+   - Green "↗ New Trade auto-filled" flash indicator on every update
+   - "→ Go to New Trade" button switches tab (values already there)
+   - Canvas redraws live on every change
 
    NEW vs v1.6.3:
    - Multiple Playbooks: unlimited named strategy sets (Normal, News Release, etc.)
@@ -2369,69 +2379,141 @@ function saveTrade(){
 function saveStrategy(){saveState();renderStrategyBuilder();notify('Playbooks saved.','success');}
 
 /* ============================================================
-   SECTION 23a — RISK CALCULATOR
+   SECTION 23a — RISK CALCULATOR  (v1.9 — live auto-calc + auto-fill)
+   Every field change instantly recalculates AND silently pushes
+   values into the New Trade form — no button required.
    ============================================================ */
 
 let _calcResults = {};
+let _calcDebounce = null;
 
 function renderCalculator(){
-  // Pre-fill balance from equity
-  const eq = computeEquityBalance();
+  const eq  = computeEquityBalance();
   const bal = document.getElementById('calc-balance');
   if(bal && !bal.value) bal.value = eq.toFixed(2);
-  // Pre-fill risk % from settings
   const riskPct = document.getElementById('calc-risk-pct');
   if(riskPct && !riskPct.value) riskPct.value = state.settings.defaultRisk || 1;
   updateCalcRiskDollar();
+  liveCalc(); // run immediately on tab open if values already present
 }
 
 function updateCalcRiskDollar(){
-  const bal = parseFloat(document.getElementById('calc-balance')?.value)||0;
-  const pct = parseFloat(document.getElementById('calc-risk-pct')?.value)||0;
+  const bal    = parseFloat(document.getElementById('calc-balance')?.value)||0;
+  const pct    = parseFloat(document.getElementById('calc-risk-pct')?.value)||0;
   const dollar = bal * pct / 100;
-  const el = document.getElementById('calc-risk-dollar');
+  const el     = document.getElementById('calc-risk-dollar');
   if(el) el.value = dollar > 0 ? dollar.toFixed(2) : '';
 }
 
-function calcPosition(){
-  const balance  = parseFloat(document.getElementById('calc-balance').value)||0;
-  const riskPct  = parseFloat(document.getElementById('calc-risk-pct').value)||0;
-  const entry    = parseFloat(document.getElementById('calc-entry').value)||0;
-  const sl       = parseFloat(document.getElementById('calc-sl').value)||0;
-  const tp       = parseFloat(document.getElementById('calc-tp').value)||0;
-  const pairType = document.getElementById('calc-pair-type').value;
-  const pipValue = parseFloat(document.getElementById('calc-pip-value').value)||0;
+/** Core calculation — called on every input change */
+function liveCalc(){
+  const balance  = parseFloat(document.getElementById('calc-balance')?.value)||0;
+  const riskPct  = parseFloat(document.getElementById('calc-risk-pct')?.value)||0;
+  const entry    = parseFloat(document.getElementById('calc-entry')?.value)||0;
+  const sl       = parseFloat(document.getElementById('calc-sl')?.value)||0;
+  const tp       = parseFloat(document.getElementById('calc-tp')?.value)||0;
+  const pairType = document.getElementById('calc-pair-type')?.value || 'forex';
+  const pipValue = parseFloat(document.getElementById('calc-pip-value')?.value)||0;
 
-  if(!balance||!riskPct||!entry||!sl){
-    notify('Fill in Balance, Risk %, Entry and Stop Loss at minimum.','error');return;
+  updateCalcRiskDollar();
+
+  // Need at minimum: balance, risk %, entry, SL to compute anything useful
+  if(!balance || !riskPct || !entry || !sl){
+    clearCalcResults();
+    return;
   }
 
-  const riskDollar = balance * riskPct / 100;
-
-  // pip size: forex = 0.0001, gold = 0.1, indices = 1
-  const pipSize = pairType==='forex' ? 0.0001 : pairType==='gold' ? 0.1 : 1;
-
-  const slPips  = Math.abs(entry - sl) / pipSize;
-  const tpPips  = tp ? Math.abs(tp - entry) / pipSize : 0;
-  const rr      = tpPips && slPips ? tpPips / slPips : 0;
-
-  // Lot size: riskDollar / (slPips × pipValuePerLot)
-  const effectivePipValue = pipValue || (pairType==='forex' ? 10 : pairType==='gold' ? 10 : 1);
-  const lots = slPips > 0 && effectivePipValue > 0 ? riskDollar / (slPips * effectivePipValue) : 0;
-  const potentialProfit = lots * tpPips * effectivePipValue;
+  const riskDollar       = balance * riskPct / 100;
+  const pipSize          = pairType==='forex' ? 0.0001 : pairType==='gold' ? 0.1 : 1;
+  const effectivePipVal  = pipValue || (pairType==='forex' ? 10 : pairType==='gold' ? 10 : 1);
+  const slPips           = Math.abs(entry - sl) / pipSize;
+  const tpPips           = tp ? Math.abs(tp - entry) / pipSize : 0;
+  const rr               = tpPips && slPips ? tpPips / slPips : 0;
+  const lots             = slPips > 0 ? riskDollar / (slPips * effectivePipVal) : 0;
+  const potentialProfit  = lots * tpPips * effectivePipVal;
 
   _calcResults = {entry, sl, tp, riskDollar, slPips, tpPips, rr, lots, potentialProfit, balance};
 
-  // Update result cards
-  setText('cr-sl-pips', slPips.toFixed(1));
-  setText('cr-tp-pips', tp ? tpPips.toFixed(1) : '—');
-  setText('cr-rr',      rr  ? '1 : ' + rr.toFixed(2) : '—');
-  setText('cr-risk-dollar', '$' + riskDollar.toFixed(2));
-  setText('cr-lots',    lots.toFixed(2));
-  setText('cr-profit',  tp  ? '+$' + potentialProfit.toFixed(2) : '—');
+  // ---- Update result display cards ----
+  setText('cr-sl-pips',    slPips > 0   ? slPips.toFixed(1)            : '—');
+  setText('cr-tp-pips',    tpPips > 0   ? tpPips.toFixed(1)            : '—');
+  setText('cr-rr',         rr > 0       ? '1 : ' + rr.toFixed(2)       : '—');
+  setText('cr-risk-dollar','$' + riskDollar.toFixed(2));
+  setText('cr-lots',       lots > 0     ? lots.toFixed(2)               : '—');
+  setText('cr-profit',     potentialProfit > 0 ? '+$' + potentialProfit.toFixed(2) : '—');
 
+  // ---- Colour the lot size card based on risk level ----
+  const lotCard = document.getElementById('cr-lots')?.closest('.calc-result-card');
+  if(lotCard){
+    lotCard.style.borderColor = lots > 0 ? 'var(--accent)' : 'var(--border)';
+  }
+
+  // ---- Redraw canvas ----
   drawCalcCanvas(entry, sl, tp);
-  notify(`Lot size: ${lots.toFixed(2)} | RR: ${rr>0?'1:'+rr.toFixed(2):'N/A'} | Risk: $${riskDollar.toFixed(2)}`,'success');
+
+  // ---- AUTO-FILL NEW TRADE (silently, in background) ----
+  autoFillNewTrade(entry, sl, tp, rr, riskPct, pairType);
+}
+
+/** Push values into the New Trade form automatically */
+function autoFillNewTrade(entry, sl, tp, rr, riskPct, pairType){
+  const setF = (id, val) => {
+    const el = document.getElementById(id);
+    if(el && val !== undefined && val !== 0) el.value = val;
+  };
+  setF('f-entry', entry || '');
+  setF('f-sl',    sl    || '');
+  if(tp)     setF('f-tp',   tp);
+  if(rr > 0) setF('f-rr',  rr.toFixed(2));
+  if(riskPct) setF('f-risk', riskPct);
+
+  // Auto-set direction: if SL < entry → BUY, SL > entry → SELL
+  if(entry && sl){
+    const dirEl = document.getElementById('f-direction');
+    if(dirEl) dirEl.value = sl < entry ? 'BUY' : 'SELL';
+  }
+
+  // Show live indicator on the calc tab that New Trade is being updated
+  const indicator = document.getElementById('calc-autofill-indicator');
+  if(indicator){
+    indicator.textContent = '↗ New Trade auto-filled';
+    indicator.style.opacity = '1';
+    clearTimeout(_calcDebounce);
+    _calcDebounce = setTimeout(() => { indicator.style.opacity = '0'; }, 2000);
+  }
+
+  updateNetPnlDisplay();
+}
+
+function clearCalcResults(){
+  ['cr-sl-pips','cr-tp-pips','cr-rr','cr-risk-dollar','cr-lots','cr-profit']
+    .forEach(id => setText(id, '—'));
+  _calcResults = {};
+  // Clear canvas
+  const canvas = document.getElementById('calc-canvas');
+  if(canvas){
+    const ctx = canvas.getContext('2d');
+    const bg  = getComputedStyle(document.documentElement).getPropertyValue('--surface2').trim();
+    canvas.width = canvas.offsetWidth || 600;
+    ctx.fillStyle = bg;
+    ctx.fillRect(0,0,canvas.width,120);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
+    ctx.font = '13px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('Enter Balance, Risk %, Entry & SL to see results', canvas.width/2, 66);
+  }
+}
+
+/** Still keep the explicit button for mobile tap confirmation */
+function calcPosition(){
+  liveCalc();
+  if(_calcResults.lots){
+    notify(
+      `Lot size: ${_calcResults.lots.toFixed(2)} | RR: ${_calcResults.rr>0?'1:'+_calcResults.rr.toFixed(2):'N/A'} | Risk: $${_calcResults.riskDollar.toFixed(2)} — New Trade auto-filled ✓`,
+      'success'
+    );
+  } else {
+    notify('Fill in Balance, Risk %, Entry and Stop Loss at minimum.','error');
+  }
 }
 
 function setText(id, val){
@@ -2447,72 +2529,71 @@ function drawCalcCanvas(entry, sl, tp){
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0,0,W,H);
 
-  const accent  = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#2563eb';
-  const success = getComputedStyle(document.documentElement).getPropertyValue('--success').trim()||'#16a34a';
-  const danger  = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()||'#dc2626';
-  const muted   = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()||'#64748b';
-  const bg      = getComputedStyle(document.documentElement).getPropertyValue('--surface2').trim()||'#f8fafc';
+  const cs     = prop => getComputedStyle(document.documentElement).getPropertyValue(prop).trim();
+  const accent  = cs('--accent')     || '#2563eb';
+  const success = cs('--success')    || '#16a34a';
+  const danger  = cs('--danger')     || '#dc2626';
+  const muted   = cs('--text-muted') || '#64748b';
+  const bg      = cs('--surface2')   || '#f8fafc';
 
-  // background
   ctx.fillStyle = bg;
-  ctx.roundRect && ctx.roundRect(0,0,W,H,6);
+  if(ctx.roundRect) ctx.roundRect(0,0,W,H,6); else ctx.rect(0,0,W,H);
   ctx.fill();
 
-  const prices = [entry, sl, tp ? tp : null].filter(Boolean);
+  const prices = [entry, sl, tp || null].filter(Boolean);
+  if(prices.length < 2) return;
   const minP = Math.min(...prices), maxP = Math.max(...prices);
-  const pad  = (maxP - minP) * 0.3 || 0.001;
+  const pad  = (maxP - minP) * 0.35 || 0.001;
   const low  = minP - pad, high = maxP + pad;
-
-  const yOf = p => 12 + (H-24) * (1 - (p - low)/(high - low));
-  const xOf = label => label==='sl' ? W*0.2 : label==='entry' ? W*0.5 : W*0.8;
+  const yOf  = p => 14 + (H - 28) * (1 - (p - low) / (high - low));
 
   const drawLine = (y, color, dashed=false) => {
     ctx.setLineDash(dashed ? [6,4] : []);
-    ctx.strokeStyle = color; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(60, y); ctx.lineTo(W-20, y); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(62, y); ctx.lineTo(W - 14, y); ctx.stroke();
     ctx.setLineDash([]);
   };
 
-  // SL zone fill
-  const ySL    = yOf(sl);
-  const yEntry = yOf(entry);
-  ctx.fillStyle = danger + '22';
-  ctx.fillRect(60, Math.min(ySL,yEntry), W-80, Math.abs(ySL-yEntry));
-
-  // TP zone fill
+  // Zone fills
+  const ySL = yOf(sl), yE = yOf(entry);
+  ctx.fillStyle = danger + '28';
+  ctx.fillRect(62, Math.min(ySL,yE), W - 76, Math.abs(ySL - yE));
   if(tp){
     const yTP = yOf(tp);
-    ctx.fillStyle = success + '22';
-    ctx.fillRect(60, Math.min(yTP,yEntry), W-80, Math.abs(yTP-yEntry));
+    ctx.fillStyle = success + '28';
+    ctx.fillRect(62, Math.min(yTP,yE), W - 76, Math.abs(yTP - yE));
   }
 
-  drawLine(yEntry, accent);
+  drawLine(yE,  accent);
   drawLine(ySL, danger, true);
   if(tp) drawLine(yOf(tp), success, true);
 
-  // Labels
-  ctx.font = '11px system-ui'; ctx.textAlign = 'right';
-  const label = (text, y, color) => {
-    ctx.fillStyle = color;
-    ctx.fillText(text, 56, y + 4);
-  };
-  label('Entry ' + entry.toFixed(4<entry.toString().indexOf('.')?5:2), yEntry, accent);
-  label('SL ' + sl.toFixed(4<sl.toString().indexOf('.')?5:2), ySL, danger);
-  if(tp) label('TP ' + tp.toFixed(4<tp.toString().indexOf('.')?5:2), yOf(tp), success);
+  // Price labels
+  ctx.font = '10.5px system-ui'; ctx.textAlign = 'right';
+  const decimals = p => p.toString().includes('.') ? Math.min(p.toString().split('.')[1].length, 5) : 2;
+  const lbl = (text, y, color) => { ctx.fillStyle = color; ctx.fillText(text, 58, y + 4); };
+  lbl(`Entry ${entry.toFixed(decimals(entry))}`, yE,     accent);
+  lbl(`SL ${sl.toFixed(decimals(sl))}`,           ySL,   danger);
+  if(tp) lbl(`TP ${tp.toFixed(decimals(tp))}`,   yOf(tp), success);
 }
 
 function sendCalcToTrade(){
-  if(!_calcResults.lots){notify('Calculate first.','error');return;}
-  const {entry, sl, tp, rr, lots} = _calcResults;
-  const setF = (id, val) => { const el=document.getElementById(id); if(el) el.value=val; };
-  setF('f-entry', entry);
-  setF('f-sl', sl);
-  if(tp) setF('f-tp', tp);
-  setF('f-rr', rr.toFixed(2));
-  document.getElementById('f-risk').value = document.getElementById('calc-risk-pct').value;
-  updateNetPnlDisplay();
-  switchTab('new-trade');
-  notify(`Loaded: Entry ${entry}, SL ${sl}${tp?', TP '+tp:''}, RR ${rr.toFixed(2)}. Lot size: ${lots.toFixed(2)} (enter manually).`,'success');
+  // With live autofill this is now just a confirmation tap + tab switch
+  if(_calcResults.entry){
+    autoFillNewTrade(
+      _calcResults.entry, _calcResults.sl, _calcResults.tp,
+      _calcResults.rr,
+      document.getElementById('calc-risk-pct')?.value,
+      document.getElementById('calc-pair-type')?.value
+    );
+    switchTab('new-trade');
+    notify(
+      `Switched to New Trade — Entry, SL${_calcResults.tp?', TP':''},  RR & Direction already filled ✓`,
+      'success'
+    );
+  } else {
+    notify('Enter at least Balance, Risk %, Entry and SL first.', 'error');
+  }
 }
 
 /* ============================================================
@@ -2954,14 +3035,19 @@ function init(){
     });
   });
 
-  document.getElementById('calc-balance')?.addEventListener('input', updateCalcRiskDollar);
-  document.getElementById('calc-risk-pct')?.addEventListener('input', updateCalcRiskDollar);
+  // ---- RISK CALCULATOR — live auto-calc on every keystroke ----
+  const calcFields = ['calc-balance','calc-risk-pct','calc-entry','calc-sl','calc-tp','calc-pip-value'];
+  calcFields.forEach(id => {
+    document.getElementById(id)?.addEventListener('input', liveCalc);
+    document.getElementById(id)?.addEventListener('change', liveCalc);
+  });
   document.getElementById('calc-pair-type')?.addEventListener('change', ()=>{
-    const t = document.getElementById('calc-pair-type').value;
+    const t  = document.getElementById('calc-pair-type').value;
     const pv = document.getElementById('calc-pip-value');
     if(pv && !pv.value){
       pv.value = t==='forex' ? 10 : t==='gold' ? 10 : 1;
     }
+    liveCalc();
   });
   document.getElementById('btn-calc-position')?.addEventListener('click', calcPosition);
   document.getElementById('btn-calc-to-trade')?.addEventListener('click', sendCalcToTrade);

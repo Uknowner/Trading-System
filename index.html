@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Trading OS v1.8.0</title>
+  <title>Trading OS v1.9.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -143,7 +143,7 @@
     </ul>
     <div id="sidebar-footer">
       <button class="btn btn-sm btn-accent" id="btn-new-trade-quick" title="Ctrl+N">+ New Trade</button>
-      <div class="sidebar-version">v1.8.0</div>
+      <div class="sidebar-version">v1.9.0</div>
     </div>
   </nav>
 
@@ -493,8 +493,13 @@
           </div>
           <div class="form-actions" style="margin-top:14px">
             <button class="btn btn-primary" id="btn-calc-position">Calculate</button>
-            <button class="btn" id="btn-calc-to-trade">→ Send to New Trade</button>
+            <button class="btn btn-primary" id="btn-calc-to-trade">→ Go to New Trade</button>
           </div>
+          <div id="calc-autofill-indicator" style="
+            margin-top:10px; font-size:12px; font-weight:600;
+            color:var(--success); opacity:0;
+            transition:opacity .3s ease;
+          ">↗ New Trade auto-filled</div>
         </div>
 
         <div class="form-section" id="calc-results-section">
