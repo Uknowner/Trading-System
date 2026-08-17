@@ -324,6 +324,10 @@ function switchTab(tab){
   document.querySelectorAll('.tab-section').forEach(s=>s.classList.remove('active'));
   document.querySelector(`.nav-item[data-tab="${tab}"]`)?.classList.add('active');
   document.getElementById(`tab-${tab}`)?.classList.add('active');
+  // Sync mobile nav
+  document.querySelectorAll('.mobile-nav-item').forEach(i=>{
+    i.classList.toggle('active', i.dataset.tab===tab);
+  });
   if(tab==='dashboard')  renderDashboard();
   if(tab==='statistics') renderStatistics();
   if(tab==='journal')    renderJournal();
@@ -2941,7 +2945,15 @@ function init(){
     resetTradeForm();loadSettingsForm();notify('All data cleared.','success');
   });
 
-  // ---- RISK CALCULATOR ----
+  // ---- MOBILE NAV ----
+  document.querySelectorAll('.mobile-nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      switchTab(item.dataset.tab);
+      document.querySelectorAll('.mobile-nav-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+
   document.getElementById('calc-balance')?.addEventListener('input', updateCalcRiskDollar);
   document.getElementById('calc-risk-pct')?.addEventListener('input', updateCalcRiskDollar);
   document.getElementById('calc-pair-type')?.addEventListener('change', ()=>{
