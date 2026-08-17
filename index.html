@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Trading OS v1.9.0</title>
+  <title>Trading OS v1.9.1</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -14,20 +14,41 @@
 
 <div id="notification-container"></div>
 
-<!-- MOBILE BOTTOM NAV -->
+<!-- MOBILE TOP HEADER BAR -->
+<div id="mobile-header">
+  <button id="mob-menu-btn" aria-label="Open navigation menu">
+    <span class="mob-hamburger">☰</span>
+  </button>
+  <div class="mob-header-brand">
+    <div class="logo-mark-sm">TO</div>
+    <span class="mob-header-title">Trading OS</span>
+  </div>
+  <button id="mob-trade-btn" class="btn btn-sm btn-primary">+ Trade</button>
+</div>
+<!-- DRAWER BACKDROP -->
+<div id="drawer-overlay"></div>
+
+<!-- MOBILE DRAWER NAV -->
 <nav id="mobile-nav">
+  <div id="mobile-nav-header">
+    <div class="mob-nav-brand">
+      <div class="logo-mark">TO</div>
+      <span class="logo-text">Trading OS</span>
+    </div>
+    <button id="mob-drawer-close" aria-label="Close menu">✕</button>
+  </div>
   <ul id="mobile-nav-list">
     <li class="mobile-nav-item active" data-tab="dashboard">
       <span class="mob-icon">▦</span><span>Dashboard</span>
     </li>
     <li class="mobile-nav-item" data-tab="new-trade">
-      <span class="mob-icon">✚</span><span>Trade</span>
+      <span class="mob-icon">✚</span><span>New Trade</span>
     </li>
     <li class="mobile-nav-item" data-tab="journal">
-      <span class="mob-icon">≡</span><span>Journal</span>
+      <span class="mob-icon">≡</span><span>Trade Journal</span>
     </li>
     <li class="mobile-nav-item" data-tab="calculator">
-      <span class="mob-icon">⊞</span><span>Calc</span>
+      <span class="mob-icon">⊞</span><span>Risk Calc</span>
     </li>
     <li class="mobile-nav-item" data-tab="goals">
       <span class="mob-icon">◎</span><span>Goals</span>
@@ -36,19 +57,19 @@
       <span class="mob-icon">◈</span><span>Account</span>
     </li>
     <li class="mobile-nav-item" data-tab="statistics">
-      <span class="mob-icon">▲</span><span>Stats</span>
+      <span class="mob-icon">▲</span><span>Statistics</span>
     </li>
     <li class="mobile-nav-item" data-tab="fees">
-      <span class="mob-icon">$</span><span>Fees</span>
+      <span class="mob-icon">$</span><span>Fees Tracker</span>
     </li>
     <li class="mobile-nav-item" data-tab="weekly">
-      <span class="mob-icon">📅</span><span>Weekly</span>
+      <span class="mob-icon">📅</span><span>Weekly Review</span>
     </li>
     <li class="mobile-nav-item" data-tab="strategy">
-      <span class="mob-icon">⚙</span><span>Strategy</span>
+      <span class="mob-icon">⚙</span><span>Strategy Builder</span>
     </li>
     <li class="mobile-nav-item" data-tab="daily">
-      <span class="mob-icon">✎</span><span>Notes</span>
+      <span class="mob-icon">✎</span><span>Daily Notes</span>
     </li>
     <li class="mobile-nav-item" data-tab="settings">
       <span class="mob-icon">⚙</span><span>Settings</span>
@@ -143,7 +164,7 @@
     </ul>
     <div id="sidebar-footer">
       <button class="btn btn-sm btn-accent" id="btn-new-trade-quick" title="Ctrl+N">+ New Trade</button>
-      <div class="sidebar-version">v1.9.0</div>
+      <div class="sidebar-version">v1.9.1</div>
     </div>
   </nav>
 

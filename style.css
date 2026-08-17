@@ -1,5 +1,5 @@
 /* ============================================================
-   TRADING OS v1.8.0 — style.css
+   TRADING OS v1.9.1 — style.css
    Mobile-first responsive design
    Breakpoints:
      --mob:  ≤ 600px  (phone portrait)
@@ -40,7 +40,8 @@ input, select, textarea { font: inherit; }
   --sidebar-w:   224px;
   --font-main:   'Inter', system-ui, -apple-system, sans-serif;
   --font-mono:   'JetBrains Mono', 'Fira Code', monospace;
-  --bottom-nav-h: 60px; /* mobile bottom nav height */
+  --bottom-nav-h: 60px; /* legacy — kept for compat */
+  --mob-header-h: 56px; /* mobile top header height */
 }
 
 /* ---------- DARK THEME ---------- */
@@ -190,87 +191,148 @@ body {
 .tab-section.active { display: block; }
 
 /* ============================================================
-   MOBILE BOTTOM NAV
+   MOBILE TOP HEADER BAR
    Hidden on desktop, shown on mobile
    ============================================================ */
-#mobile-nav {
-  display: none;
+#mobile-header {
+  display: none; /* shown in mobile breakpoint */
   position: fixed;
-  bottom: 0; left: 0; right: 0;
-  height: var(--bottom-nav-h);
+  top: 0; left: 0; right: 0;
+  height: var(--mob-header-h);
   background: var(--sidebar-bg);
-  border-top: 1px solid rgba(255,255,255,.08);
-  z-index: 300;
-  overflow-x: auto;
-  overflow-y: hidden;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  z-index: 400;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+}
+#mob-menu-btn {
+  background: none;
+  border: none;
+  color: #cbd5e1;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--trans);
+}
+#mob-menu-btn:hover { background: rgba(255,255,255,.08); }
+.mob-hamburger { font-size: 22px; line-height: 1; display: block; }
+.mob-header-brand {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+}
+.logo-mark-sm {
+  width: 26px; height: 26px;
+  background: var(--accent);
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; color: #fff;
+  letter-spacing: -.02em; flex-shrink: 0;
+}
+.mob-header-title {
+  font-weight: 700; font-size: 15px; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#mob-trade-btn {
+  flex-shrink: 0;
+  font-size: 12px !important;
+  padding: 6px 12px !important;
+}
+
+/* ============================================================
+   MOBILE DRAWER NAV
+   Hidden on desktop. Slides in from the left on mobile.
+   ============================================================ */
+#mobile-nav {
+  display: none; /* block on mobile */
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: 272px;
+  max-width: calc(100vw - 56px); /* always leave a sliver to tap-close */
+  background: var(--sidebar-bg);
+  border-right: 1px solid rgba(255,255,255,.06);
+  z-index: 500;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transform: translateX(-100%);
+  transition: transform .26s cubic-bezier(.4,0,.2,1);
   -webkit-overflow-scrolling: touch;
-  /* Hide scrollbar */
   scrollbar-width: none;
 }
 #mobile-nav::-webkit-scrollbar { display: none; }
+#mobile-nav.open { transform: translateX(0); }
+
+/* Drawer header (logo + close btn) */
+#mobile-nav-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  flex-shrink: 0;
+}
+.mob-nav-brand { display: flex; align-items: center; gap: 9px; }
+#mob-drawer-close {
+  background: none; border: none;
+  color: rgba(255,255,255,.4); font-size: 18px;
+  padding: 4px 8px; border-radius: 5px; cursor: pointer;
+  transition: color var(--trans), background var(--trans);
+  -webkit-tap-highlight-color: transparent;
+}
+#mob-drawer-close:hover { color: #fff; background: rgba(255,255,255,.08); }
+
+/* Drawer nav list — vertical */
 #mobile-nav-list {
   display: flex;
-  align-items: stretch;
-  height: 100%;
-  min-width: max-content;
-  padding: 0 4px;
+  flex-direction: column;
+  padding: 8px 8px 24px;
+  gap: 2px;
 }
 .mobile-nav-item {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 4px 14px;
+  gap: 10px;
+  padding: 10px 12px;
   color: var(--sidebar-txt);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 13.5px;
   font-weight: 500;
-  border-radius: 8px;
-  min-width: 58px;
+  border-radius: 7px;
+  min-height: 44px;
   transition: color var(--trans), background var(--trans);
   white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
 }
 .mobile-nav-item .mob-icon {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: .7;
 }
+.mobile-nav-item:hover { background: rgba(255,255,255,.06); color: #e2e8f0; }
 .mobile-nav-item.active {
-  color: var(--accent);
-}
-.mobile-nav-item.active .mob-icon {
-  /* accent dot under icon */
-  position: relative;
-}
-.mobile-nav-item.active .mob-icon::after {
-  content: '';
-  position: absolute;
-  bottom: -3px; left: 50%;
-  transform: translateX(-50%);
-  width: 4px; height: 4px;
-  background: var(--accent);
-  border-radius: 50%;
-}
-
-/* FAB — floating New Trade button on mobile */
-#mob-fab {
-  display: none;
-  position: fixed;
-  bottom: calc(var(--bottom-nav-h) + 14px);
-  right: 16px;
-  width: 52px; height: 52px;
   background: var(--accent);
   color: #fff;
-  border: none;
-  border-radius: 50%;
-  font-size: 26px;
-  box-shadow: 0 4px 16px rgba(37,99,235,.45);
-  z-index: 290;
+}
+.mobile-nav-item.active .mob-icon { opacity: 1; }
+
+/* Drawer backdrop overlay */
+#drawer-overlay {
   display: none;
-  align-items: center;
-  justify-content: center;
-  -webkit-tap-highlight-color: transparent;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 490;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  opacity: 0;
+  transition: opacity .26s ease;
+}
+#drawer-overlay.active {
+  display: block;
+  opacity: 1;
 }
 
 /* ============================================================
@@ -297,13 +359,13 @@ body {
   /* Hide desktop sidebar entirely */
   #sidebar { display: none; }
 
-  /* Show mobile bottom nav + FAB */
-  #mobile-nav { display: block; }
-  #mob-fab    { display: flex; }
+  /* Show mobile header + drawer nav */
+  #mobile-header { display: flex; }
+  #mobile-nav    { display: block; }
 
-  /* Push content above bottom nav */
+  /* Push content below the top header bar */
   #main-content {
-    padding: 16px 14px calc(var(--bottom-nav-h) + 16px);
+    padding: calc(var(--mob-header-h) + 16px) 14px 24px;
   }
 
   /* Page headers */
@@ -426,8 +488,8 @@ body {
     padding: 20px 16px;
   }
 
-  /* Notifications: full width */
-  #notification-container { left: 14px; right: 14px; top: 10px; }
+  /* Notifications: full width, below mobile header */
+  #notification-container { left: 10px; right: 10px; top: calc(var(--mob-header-h) + 8px); }
   .notification { min-width: 0; max-width: 100%; font-size: 13px; }
 
   /* Calc results: 2 columns */
@@ -483,7 +545,7 @@ body {
 
 /* ---- Small phone (≤ 480px) ---- */
 @media (max-width: 480px) {
-  #main-content { padding: 12px 10px calc(var(--bottom-nav-h) + 12px); }
+  #main-content { padding: calc(var(--mob-header-h) + 12px) 10px 20px; }
 
   .page-title { font-size: 16px; }
 

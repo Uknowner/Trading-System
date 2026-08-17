@@ -1,5 +1,5 @@
 /* ============================================================
-   TRADING OS — script.js  v1.9.0
+   TRADING OS — script.js  v1.9.1
 
    NEW vs v1.8.0:
    - Risk Calculator is now fully LIVE — every keystroke auto-calculates
@@ -2159,15 +2159,15 @@ function exportSiteZip(){
   const fetchText = url => url ? fetch(url).then(r=>r.text()).catch(()=>'') : Promise.resolve('');
   Promise.all([fetchText(cssHref), fetchText(jsHref)]).then(([cssText, jsText])=>{
     const files = [
-      {name:'trading-os-v1.8.0/index.html', data: htmlContent},
-      {name:'trading-os-v1.8.0/style.css',  data: cssText},
-      {name:'trading-os-v1.8.0/script.js',  data: jsText},
+      {name:'trading-os-v1.9.1/index.html', data: htmlContent},
+      {name:'trading-os-v1.9.1/style.css',  data: cssText},
+      {name:'trading-os-v1.9.1/script.js',  data: jsText},
     ];
     const zip = buildZip(files);
     const blob = new Blob([zip], {type:'application/zip'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `trading-os-v1.8.0-${todayStr()}.zip`;
+    a.download = `trading-os-v1.9.1-${todayStr()}.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
     notify('Site ZIP downloaded! Extract and open index.html.','success');
@@ -2578,17 +2578,23 @@ function drawCalcCanvas(entry, sl, tp){
 }
 
 function sendCalcToTrade(){
-  // With live autofill this is now just a confirmation tap + tab switch
   if(_calcResults.entry){
-    autoFillNewTrade(
-      _calcResults.entry, _calcResults.sl, _calcResults.tp,
-      _calcResults.rr,
-      document.getElementById('calc-risk-pct')?.value,
-      document.getElementById('calc-pair-type')?.value
-    );
+    // Capture values BEFORE switchTab resets the trade form
+    const entry    = _calcResults.entry;
+    const sl       = _calcResults.sl;
+    const tp       = _calcResults.tp;
+    const rr       = _calcResults.rr;
+    const riskPct  = document.getElementById('calc-risk-pct')?.value;
+    const pairType = document.getElementById('calc-pair-type')?.value;
+
+    // Switch tab first (this calls resetTradeForm internally)
     switchTab('new-trade');
+
+    // THEN fill the freshly-reset form with calculator values
+    autoFillNewTrade(entry, sl, tp, rr, riskPct, pairType);
+
     notify(
-      `Switched to New Trade — Entry, SL${_calcResults.tp?', TP':''},  RR & Direction already filled ✓`,
+      `Switched to New Trade — Entry, SL${tp?', TP':''},  RR & Direction already filled ✓`,
       'success'
     );
   } else {
@@ -3026,14 +3032,57 @@ function init(){
     resetTradeForm();loadSettingsForm();notify('All data cleared.','success');
   });
 
-  // ---- MOBILE NAV ----
-  document.querySelectorAll('.mobile-nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-      switchTab(item.dataset.tab);
-      document.querySelectorAll('.mobile-nav-item').forEach(i => i.classList.remove('active'));
-      item.classList.add('active');
+  // ---- MOBILE DRAWER ----
+  (function initMobileDrawer(){
+    const drawer  = document.getElementById('mobile-nav');
+    const overlay = document.getElementById('drawer-overlay');
+    const menuBtn = document.getElementById('mob-menu-btn');
+    const closeBtn= document.getElementById('mob-drawer-close');
+    const tradeBtn= document.getElementById('mob-trade-btn');
+
+    function openDrawer(){
+      drawer?.classList.add('open');
+      // Force reflow so the opacity transition plays
+      if(overlay){ overlay.style.display='block'; requestAnimationFrame(()=>overlay.classList.add('active')); }
+      document.body.style.overflow='hidden'; // prevent background scroll
+    }
+    function closeDrawer(){
+      drawer?.classList.remove('open');
+      if(overlay){
+        overlay.classList.remove('active');
+        // Wait for fade-out before hiding
+        overlay.addEventListener('transitionend', ()=>{ overlay.style.display='none'; }, {once:true});
+      }
+      document.body.style.overflow='';
+    }
+
+    menuBtn ?.addEventListener('click', openDrawer);
+    closeBtn?.addEventListener('click', closeDrawer);
+    overlay ?.addEventListener('click', closeDrawer);
+
+    // Quick-trade button in header
+    tradeBtn?.addEventListener('click', ()=>{
+      closeDrawer();
+      _editingTradeId=null; resetTradeForm(); switchTab('new-trade');
     });
-  });
+
+    // Close drawer when any nav item is tapped
+    document.querySelectorAll('.mobile-nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        switchTab(item.dataset.tab);
+        document.querySelectorAll('.mobile-nav-item').forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        closeDrawer();
+      });
+    });
+
+    // Swipe-to-close (touch drag left on drawer)
+    let touchStartX = 0;
+    drawer?.addEventListener('touchstart', e=>{ touchStartX = e.touches[0].clientX; }, {passive:true});
+    drawer?.addEventListener('touchend',   e=>{
+      if(e.changedTouches[0].clientX - touchStartX < -50) closeDrawer();
+    }, {passive:true});
+  })();
 
   // ---- RISK CALCULATOR — live auto-calc on every keystroke ----
   const calcFields = ['calc-balance','calc-risk-pct','calc-entry','calc-sl','calc-tp','calc-pip-value'];
