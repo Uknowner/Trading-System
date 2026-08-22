@@ -1,5 +1,15 @@
 /* ============================================================
-   TRADING OS — script.js  v1.9.1
+   TRADING OS — script.js  v2.0.0
+
+   NEW vs v1.9.0:
+   - MULTIPLE ACCOUNTS: unlimited named accounts, each fully independent
+     (own trades, transactions, settings, goals, daily/weekly notes)
+   - Account switcher in sidebar + account manager modal (add/rename/delete/switch)
+   - All data scoped to active account — switching is instant
+   - DUPLICATE PLAYBOOK: one-click clone of any playbook with new ID
+   - DRAG TO REORDER: categories drag up/down within a playbook
+   - DRAG TO REORDER: individual rules drag within their category
+   - Drag handle (⠿) on every category and rule, visual drop indicator
 
    NEW vs v1.8.0:
    - Risk Calculator is now fully LIVE — every keystroke auto-calculates
@@ -161,55 +171,220 @@ const DEFAULT_GOALS = {
 };
 
 /* ============================================================
-   SECTION 2 — STATE / STORAGE
+   SECTION 2 — STATE / STORAGE  (v2.0 multi-account)
+
+   Root storage shape:
+   {
+     activeAccountId: string,
+     accounts: [ Account, ... ]
+   }
+
+   Account shape:
+   {
+     id, name, color,
+     playbooks, trades, transactions,
+     dailyNotes, weeklyNotes,
+     settings, goals, mistakes, strengths
+   }
    ============================================================ */
 
-const DB_KEY = 'tradingOS_v1';
+const DB_KEY = 'tradingOS_v2';
 
-let state = {
-  playbooks:   DEFAULT_PLAYBOOKS,   // replaces old 'strategy'
-  trades:      [],
-  transactions:[], // {id, type:'deposit'|'withdrawal', date, amount, note}
-  dailyNotes:  [], // {id, date, note}
-  weeklyNotes: [], // {id, weekStart (YYYY-MM-DD Monday), note}
-  settings:    {...DEFAULT_SETTINGS},
-  goals:       {...DEFAULT_GOALS},
-  mistakes:    [...DEFAULT_MISTAKES],
-  strengths:   [...DEFAULT_STRENGTHS],
+function makeDefaultAccount(name='Main Account', color='#2563eb'){
+  return {
+    id: uid(),
+    name,
+    color,
+    playbooks:    structuredClone ? structuredClone(DEFAULT_PLAYBOOKS) : JSON.parse(JSON.stringify(DEFAULT_PLAYBOOKS)),
+    trades:       [],
+    transactions: [],
+    dailyNotes:   [],
+    weeklyNotes:  [],
+    settings:     {...DEFAULT_SETTINGS},
+    goals:        {...DEFAULT_GOALS},
+    mistakes:     [...DEFAULT_MISTAKES],
+    strengths:    [...DEFAULT_STRENGTHS],
+  };
+}
+
+// Root state — all multi-account data lives here
+let root = {
+  activeAccountId: null,
+  accounts: [],
 };
+
+// `state` is always a REFERENCE to the active account — every existing
+// function that reads state.trades / state.settings / etc. continues to
+// work without modification.
+let state = null;
+
+function getActiveAccount(){
+  return root.accounts.find(a=>a.id===root.activeAccountId) ?? root.accounts[0];
+}
+
+function setActiveAccount(id){
+  const acct = root.accounts.find(a=>a.id===id);
+  if(!acct) return;
+  root.activeAccountId = id;
+  state = acct;
+}
 
 function loadState(){
   try{
-    const raw=localStorage.getItem(DB_KEY);
+    const raw = localStorage.getItem(DB_KEY);
     if(raw){
-      const s=JSON.parse(raw);
-      // Migrate old flat 'strategy' array → single playbook
-      let playbooks = s.playbooks ?? null;
-      if(!playbooks && s.strategy){
-        playbooks = [{id:'pb-migrated', name:'My Strategy', categories: s.strategy}];
+      const saved = JSON.parse(raw);
+
+      if(saved.accounts && Array.isArray(saved.accounts) && saved.accounts.length){
+        // v2 format
+        root.accounts = saved.accounts.map(a => migrateAccount(a));
+        root.activeAccountId = saved.activeAccountId ?? root.accounts[0].id;
+      } else {
+        // Migrate v1 single-account save
+        const migrated = migrateAccount(saved);
+        migrated.name = 'Main Account';
+        root.accounts = [migrated];
+        root.activeAccountId = migrated.id;
       }
-      playbooks = playbooks ?? DEFAULT_PLAYBOOKS;
-      // Ensure all rules have followUps array (migration safety)
-      playbooks.forEach(pb=>pb.categories.forEach(cat=>cat.rules.forEach(r=>{if(!r.followUps)r.followUps=[];})));
-      state={
-        playbooks,
-        trades:      s.trades       ?? [],
-        transactions:s.transactions ?? [],
-        dailyNotes:  s.dailyNotes   ?? [],
-        weeklyNotes: s.weeklyNotes  ?? [],
-        settings:    {...DEFAULT_SETTINGS,...(s.settings??{})},
-        goals:       {...DEFAULT_GOALS,...(s.goals??{})},
-        mistakes:    s.mistakes     ?? [...DEFAULT_MISTAKES],
-        strengths:   s.strengths    ?? [...DEFAULT_STRENGTHS],
-      };
+    } else {
+      // Fresh install
+      const acct = makeDefaultAccount('Main Account');
+      root.accounts = [acct];
+      root.activeAccountId = acct.id;
     }
-  }catch(e){console.error('loadState:',e);}
+  } catch(e){
+    console.error('loadState:', e);
+    const acct = makeDefaultAccount('Main Account');
+    root.accounts = [acct];
+    root.activeAccountId = acct.id;
+  }
+  // Point state at active account
+  state = getActiveAccount();
+}
+
+function migrateAccount(s){
+  // Handle old flat 'strategy' → playbooks
+  let playbooks = s.playbooks ?? null;
+  if(!playbooks && s.strategy){
+    playbooks = [{id:'pb-migrated', name:'My Strategy', categories: s.strategy}];
+  }
+  playbooks = playbooks ?? JSON.parse(JSON.stringify(DEFAULT_PLAYBOOKS));
+  playbooks.forEach(pb=>pb.categories.forEach(cat=>cat.rules.forEach(r=>{if(!r.followUps)r.followUps=[];})));
+  return {
+    id:           s.id           ?? uid(),
+    name:         s.name         ?? 'Account',
+    color:        s.color        ?? '#2563eb',
+    playbooks,
+    trades:       s.trades       ?? [],
+    transactions: s.transactions ?? [],
+    dailyNotes:   s.dailyNotes   ?? [],
+    weeklyNotes:  s.weeklyNotes  ?? [],
+    settings:     {...DEFAULT_SETTINGS, ...(s.settings ?? {})},
+    goals:        {...DEFAULT_GOALS,    ...(s.goals    ?? {})},
+    mistakes:     s.mistakes     ?? [...DEFAULT_MISTAKES],
+    strengths:    s.strengths    ?? [...DEFAULT_STRENGTHS],
+  };
 }
 
 function saveState(){
-  try{localStorage.setItem(DB_KEY,JSON.stringify(state));}
-  catch(e){console.error('saveState:',e);}
+  try{
+    // Make sure active account ref is current
+    const idx = root.accounts.findIndex(a=>a.id===root.activeAccountId);
+    if(idx>=0) root.accounts[idx] = state;
+    localStorage.setItem(DB_KEY, JSON.stringify(root));
+  } catch(e){ console.error('saveState:',e); }
 }
+
+/* ---- ACCOUNT SWITCHER ---- */
+function switchAccount(id){
+  // Save current state back into accounts array
+  const idx = root.accounts.findIndex(a=>a.id===root.activeAccountId);
+  if(idx>=0) root.accounts[idx] = state;
+
+  setActiveAccount(id);
+  saveState();
+
+  // Reset UI state that is per-account
+  _activePbIdx = 0;
+  _activeChecklistPb = 0;
+  _editingTradeId = null;
+  _editingTxnId = null;
+  _journalPage = 0;
+  _weeklyDate = null;
+
+  // Re-render everything
+  renderAccountSwitcher();
+  applyTheme();
+  renderDashboard();
+  renderStrategyBuilder();
+  renderPlaybookSelector();
+  resetTradeForm();
+  loadSettingsForm();
+  loadGoalsForm();
+  const activeTab = document.querySelector('.tab-section.active')?.id?.replace('tab-','');
+  if(activeTab) switchTab(activeTab);
+
+  notify(`Switched to "${state.name}"`, 'success');
+}
+
+function renderAccountSwitcher(){
+  const el = document.getElementById('account-switcher');
+  if(!el) return;
+  el.innerHTML = root.accounts.map(a=>`
+    <div class="acct-switch-item ${a.id===root.activeAccountId?'active':''}"
+         onclick="switchAccount('${a.id}')" title="${esc(a.name)}">
+      <span class="acct-dot" style="background:${esc(a.color)}"></span>
+      <span class="acct-switch-name">${esc(a.name)}</span>
+      ${a.id===root.activeAccountId?'<span class="acct-active-tick">✓</span>':''}
+    </div>`).join('');
+}
+
+/* ---- ACCOUNT MANAGER MODAL ---- */
+function openAccountManager(){
+  const modal = document.getElementById('acct-manager-overlay');
+  if(!modal) return;
+  renderAccountManagerList();
+  modal.classList.remove('hidden');
+}
+function closeAccountManager(){
+  document.getElementById('acct-manager-overlay')?.classList.add('hidden');
+}
+function renderAccountManagerList(){
+  const list = document.getElementById('acct-manager-list');
+  if(!list) return;
+  list.innerHTML = root.accounts.map(a=>`
+    <div class="acct-manager-row">
+      <input type="color" class="acct-color-pick" value="${esc(a.color)}"
+        onchange="updateAccountColor('${a.id}',this.value)"/>
+      <input type="text" class="acct-name-inp" value="${esc(a.name)}"
+        onchange="updateAccountName('${a.id}',this.value)" placeholder="Account name"/>
+      <span class="acct-badge">${a.trades.length} trades</span>
+      ${root.accounts.length>1
+        ?`<button class="btn btn-sm btn-danger" onclick="deleteAccount('${a.id}')">Del</button>`
+        :'<button class="btn btn-sm" disabled>Del</button>'}
+    </div>`).join('');
+}
+
+window.updateAccountName = function(id, name){
+  const a = root.accounts.find(x=>x.id===id);
+  if(a){ a.name=name.trim()||'Account'; if(a.id===root.activeAccountId)state.name=a.name; }
+  saveState(); renderAccountSwitcher();
+};
+window.updateAccountColor = function(id, color){
+  const a = root.accounts.find(x=>x.id===id);
+  if(a){ a.color=color; if(a.id===root.activeAccountId)state.color=color; }
+  saveState(); renderAccountSwitcher(); applyAccentFromAccount();
+};
+window.deleteAccount = async function(id){
+  if(root.accounts.length<=1){notify('Cannot delete the only account.','error');return;}
+  const a=root.accounts.find(x=>x.id===id);
+  if(!await confirm(`Delete account "${a?.name}"? All its trades and data will be lost permanently.`))return;
+  root.accounts=root.accounts.filter(x=>x.id!==id);
+  if(root.activeAccountId===id) switchAccount(root.accounts[0].id);
+  else { saveState(); renderAccountManagerList(); renderAccountSwitcher(); }
+  notify('Account deleted.','success');
+};
+window.switchAccount = switchAccount;
 
 /* ============================================================
    SECTION 3 — BALANCE HELPERS
@@ -317,6 +492,11 @@ function applyTheme(){
   document.documentElement.setAttribute('data-theme',theme==='system'?'':theme);
   document.documentElement.style.setProperty('--accent',accentColor);
   document.documentElement.style.setProperty('--accent-h',accentColor);
+}
+function applyAccentFromAccount(){
+  // Each account can optionally tint the UI with its colour
+  // Currently uses settings accentColor; account dot colour is separate
+  applyTheme();
 }
 
 /* ============================================================
@@ -706,10 +886,12 @@ window.deleteTransaction=async function(id){
 };
 
 /* ============================================================
-   SECTION 10 — STRATEGY BUILDER  (v1.7 — multiple playbooks)
+   SECTION 10 — STRATEGY BUILDER  (v2.0 — duplicate + drag reorder)
    ============================================================ */
 
-let _activePbIdx = 0; // which playbook tab is open in builder
+let _activePbIdx = 0;
+let _dragSrcCat  = null; // index of category being dragged
+let _dragSrcRule = null; // {ci, ri} of rule being dragged
 
 function renderStrategyBuilder(){
   const wrap = document.getElementById('strategy-builder');
@@ -725,15 +907,45 @@ function renderStrategyBuilder(){
     tab.addEventListener('click', () => { _activePbIdx = pbi; renderStrategyBuilder(); });
     tabBar.appendChild(tab);
   });
+
+  // + New Playbook
   const addPbBtn = document.createElement('button');
   addPbBtn.className = 'btn btn-sm';
   addPbBtn.textContent = '+ New Playbook';
   addPbBtn.addEventListener('click', () => {
-    state.playbooks.push({id: uid(), name: 'New Playbook', categories: []});
+    state.playbooks.push({id:uid(), name:'New Playbook', categories:[]});
     _activePbIdx = state.playbooks.length - 1;
     renderStrategyBuilder();
   });
   tabBar.appendChild(addPbBtn);
+
+  // Duplicate active playbook
+  const dupPbBtn = document.createElement('button');
+  dupPbBtn.className = 'btn btn-sm';
+  dupPbBtn.title = 'Duplicate this playbook';
+  dupPbBtn.textContent = '⧉ Duplicate';
+  dupPbBtn.addEventListener('click', () => {
+    const src = state.playbooks[_activePbIdx];
+    if(!src) return;
+    // Deep clone and assign new IDs throughout
+    const clone = JSON.parse(JSON.stringify(src));
+    clone.id   = uid();
+    clone.name = src.name + ' (Copy)';
+    clone.categories.forEach(cat => {
+      cat.id = uid();
+      cat.rules.forEach(r => {
+        r.id = uid();
+        (r.followUps||[]).forEach(fu => { fu.id = uid(); });
+      });
+    });
+    state.playbooks.splice(_activePbIdx + 1, 0, clone);
+    _activePbIdx = _activePbIdx + 1;
+    saveState();
+    renderStrategyBuilder();
+    notify(`Duplicated "${src.name}" → "${clone.name}"`, 'success');
+  });
+  tabBar.appendChild(dupPbBtn);
+
   wrap.appendChild(tabBar);
 
   const pb = state.playbooks[_activePbIdx];
@@ -744,46 +956,121 @@ function renderStrategyBuilder(){
   pbHeader.className = 'pb-header';
   pbHeader.innerHTML = `
     <input class="pb-name-input" type="text" value="${esc(pb.name)}" placeholder="Playbook name"/>
-    <button class="btn btn-sm btn-danger" id="btn-del-playbook">✕ Delete Playbook</button>`;
+    <button class="btn btn-sm btn-danger" id="btn-del-playbook">✕ Delete</button>`;
   wrap.appendChild(pbHeader);
 
   pbHeader.querySelector('.pb-name-input').addEventListener('change', e => {
-    state.playbooks[_activePbIdx].name = e.target.value.trim();
+    state.playbooks[_activePbIdx].name = e.target.value.trim() || 'Playbook';
     renderStrategyBuilder();
   });
   pbHeader.querySelector('#btn-del-playbook').addEventListener('click', async () => {
-    if(state.playbooks.length <= 1){ notify('You must keep at least one playbook.','error'); return; }
-    if(!await confirm(`Delete playbook "${pb.name}"? This cannot be undone.`)) return;
+    if(state.playbooks.length <= 1){ notify('Must keep at least one playbook.','error'); return; }
+    if(!await confirm(`Delete playbook "${pb.name}"? Cannot be undone.`)) return;
     state.playbooks.splice(_activePbIdx, 1);
     _activePbIdx = Math.max(0, _activePbIdx - 1);
     renderStrategyBuilder();
   });
 
-  // ---- Categories ----
+  // ---- Categories (draggable) ----
+  const catsWrap = document.createElement('div');
+  catsWrap.className = 'strategy-cats-wrap';
+
   pb.categories.forEach((cat, ci) => {
     const catEl = document.createElement('div');
     catEl.className = 'strategy-category';
+    catEl.draggable = true;
+    catEl.dataset.ci = ci;
 
+    // --- Category drag events ---
+    catEl.addEventListener('dragstart', e => {
+      _dragSrcCat = ci;
+      _dragSrcRule = null;
+      e.dataTransfer.effectAllowed = 'move';
+      catEl.classList.add('drag-ghost');
+    });
+    catEl.addEventListener('dragend', () => {
+      document.querySelectorAll('.drag-ghost,.drag-over-cat,.drag-over-rule').forEach(el=>{
+        el.classList.remove('drag-ghost','drag-over-cat','drag-over-rule');
+      });
+    });
+    catEl.addEventListener('dragover', e => {
+      if(_dragSrcCat===null || _dragSrcRule!==null) return;
+      e.preventDefault(); e.dataTransfer.dropEffect='move';
+      catEl.classList.add('drag-over-cat');
+    });
+    catEl.addEventListener('dragleave', () => catEl.classList.remove('drag-over-cat'));
+    catEl.addEventListener('drop', e => {
+      e.preventDefault();
+      catEl.classList.remove('drag-over-cat');
+      if(_dragSrcCat===null || _dragSrcCat===ci || _dragSrcRule!==null) return;
+      // Reorder categories
+      const moved = pb.categories.splice(_dragSrcCat, 1)[0];
+      const newCi = _dragSrcCat < ci ? ci - 1 : ci;
+      pb.categories.splice(newCi, 0, moved);
+      _dragSrcCat = null;
+      saveState(); renderStrategyBuilder();
+    });
+
+    // Header
     const header = document.createElement('div');
     header.className = 'strategy-cat-header';
     header.innerHTML = `
+      <span class="drag-handle" title="Drag to reorder category">⠿</span>
       <input class="strategy-cat-name" type="text" value="${esc(cat.name)}" placeholder="Category name"/>
-      <button class="btn btn-sm btn-danger">✕ Remove Category</button>`;
+      <button class="btn btn-sm btn-danger cat-del-btn">✕</button>`;
     header.querySelector('input').addEventListener('change', e => { cat.name = e.target.value.trim(); });
-    header.querySelector('button').addEventListener('click', async () => {
+    header.querySelector('.cat-del-btn').addEventListener('click', async e => {
+      e.stopPropagation();
       if(await confirm(`Remove category "${cat.name}"?`)){ pb.categories.splice(ci,1); renderStrategyBuilder(); }
     });
     catEl.appendChild(header);
 
+    // Rules list (draggable within category)
     const rulesList = document.createElement('div');
     rulesList.className = 'strategy-rules-list';
+    rulesList.dataset.ci = ci;
+
     cat.rules.forEach((rule, ri) => {
-      rulesList.appendChild(buildRuleEditor(pb, ci, cat, ri, rule));
+      const ruleBlock = buildRuleEditor(pb, ci, cat, ri, rule);
+      ruleBlock.draggable = true;
+      ruleBlock.dataset.ri = ri;
+
+      ruleBlock.addEventListener('dragstart', e => {
+        _dragSrcCat  = null;
+        _dragSrcRule = {ci, ri};
+        e.dataTransfer.effectAllowed = 'move';
+        e.stopPropagation(); // don't trigger category drag
+        ruleBlock.classList.add('drag-ghost');
+      });
+      ruleBlock.addEventListener('dragend', () => {
+        document.querySelectorAll('.drag-ghost,.drag-over-rule').forEach(el=>{
+          el.classList.remove('drag-ghost','drag-over-rule');
+        });
+      });
+      ruleBlock.addEventListener('dragover', e => {
+        if(!_dragSrcRule || _dragSrcRule.ci !== ci) return;
+        e.preventDefault(); e.stopPropagation();
+        ruleBlock.classList.add('drag-over-rule');
+      });
+      ruleBlock.addEventListener('dragleave', () => ruleBlock.classList.remove('drag-over-rule'));
+      ruleBlock.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation();
+        ruleBlock.classList.remove('drag-over-rule');
+        if(!_dragSrcRule || _dragSrcRule.ci!==ci || _dragSrcRule.ri===ri) return;
+        const moved = cat.rules.splice(_dragSrcRule.ri, 1)[0];
+        const newRi = _dragSrcRule.ri < ri ? ri - 1 : ri;
+        cat.rules.splice(newRi, 0, moved);
+        _dragSrcRule = null;
+        saveState(); renderStrategyBuilder();
+      });
+
+      rulesList.appendChild(ruleBlock);
     });
     catEl.appendChild(rulesList);
 
-    const addRule = document.createElement('div');
-    addRule.className = 'strategy-add-rule';
+    // Add rule footer
+    const addRuleDiv = document.createElement('div');
+    addRuleDiv.className = 'strategy-add-rule';
     const addRuleBtn = document.createElement('button');
     addRuleBtn.className = 'btn btn-sm';
     addRuleBtn.textContent = '+ Add Rule';
@@ -791,15 +1078,17 @@ function renderStrategyBuilder(){
       cat.rules.push({id:uid(), name:'New Rule', desc:'', weight:5, required:false, followUps:[]});
       renderStrategyBuilder();
     });
-    addRule.appendChild(addRuleBtn);
-    catEl.appendChild(addRule);
+    addRuleDiv.appendChild(addRuleBtn);
+    catEl.appendChild(addRuleDiv);
 
-    wrap.appendChild(catEl);
+    catsWrap.appendChild(catEl);
   });
 
-  // Add category button
+  wrap.appendChild(catsWrap);
+
+  // Add category
   const addCatDiv = document.createElement('div');
-  addCatDiv.style.cssText = 'margin-top:8px';
+  addCatDiv.style.cssText = 'margin-top:10px';
   const addCatBtn = document.createElement('button');
   addCatBtn.className = 'btn btn-sm';
   addCatBtn.textContent = '+ Add Category';
@@ -819,6 +1108,7 @@ function buildRuleEditor(pb, ci, cat, ri, rule){
   const row = document.createElement('div');
   row.className = 'strategy-rule';
   row.innerHTML = `
+    <span class="drag-handle rule-drag-handle" title="Drag to reorder rule">⠿</span>
     <input type="text" value="${esc(rule.name)}" placeholder="Rule name"/>
     <input type="text" value="${esc(rule.desc)}" placeholder="Description (optional)"/>
     <input type="number" value="${rule.weight}" min="1" max="10" style="width:60px" title="Weight 1–10"/>
@@ -1608,16 +1898,23 @@ window.deleteDailyNote=function(date){
    ============================================================ */
 
 function exportJSON(){
+  // Export active account only
   const data={
-    exportedAt:new Date().toISOString(),version:7,
-    playbooks:state.playbooks,trades:state.trades,
-    transactions:state.transactions,dailyNotes:state.dailyNotes,
+    exportedAt:new Date().toISOString(), version:8,
+    accountName: state.name,
+    playbooks:state.playbooks, trades:state.trades,
+    transactions:state.transactions, dailyNotes:state.dailyNotes,
     weeklyNotes:state.weeklyNotes,
-    mistakes:state.mistakes,strengths:state.strengths,
-    settings:state.settings,goals:state.goals,
+    mistakes:state.mistakes, strengths:state.strengths,
+    settings:state.settings, goals:state.goals,
   };
-  downloadFile(JSON.stringify(data,null,2),`trading-os-data-${todayStr()}.json`);
-  notify('Full data exported as JSON.','success');
+  downloadFile(JSON.stringify(data,null,2),`trading-os-${state.name.replace(/\s+/g,'-')}-${todayStr()}.json`);
+  notify(`"${state.name}" exported as JSON.`,'success');
+}
+
+function backupAll(){
+  downloadFile(JSON.stringify(root,null,2),`trading-os-ALL-ACCOUNTS-BACKUP-${todayStr()}.json`);
+  notify('Full backup (all accounts) downloaded.','success');
 }
 
 /* ---- XLSX helpers ---- */
@@ -2159,15 +2456,15 @@ function exportSiteZip(){
   const fetchText = url => url ? fetch(url).then(r=>r.text()).catch(()=>'') : Promise.resolve('');
   Promise.all([fetchText(cssHref), fetchText(jsHref)]).then(([cssText, jsText])=>{
     const files = [
-      {name:'trading-os-v1.9.1/index.html', data: htmlContent},
-      {name:'trading-os-v1.9.1/style.css',  data: cssText},
-      {name:'trading-os-v1.9.1/script.js',  data: jsText},
+      {name:'trading-os-v1.8.0/index.html', data: htmlContent},
+      {name:'trading-os-v1.8.0/style.css',  data: cssText},
+      {name:'trading-os-v1.8.0/script.js',  data: jsText},
     ];
     const zip = buildZip(files);
     const blob = new Blob([zip], {type:'application/zip'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `trading-os-v1.9.1-${todayStr()}.zip`;
+    a.download = `trading-os-v1.8.0-${todayStr()}.zip`;
     a.click();
     URL.revokeObjectURL(a.href);
     notify('Site ZIP downloaded! Extract and open index.html.','success');
@@ -2281,10 +2578,7 @@ function importJSON(file){
   reader.readAsText(file);
 }
 
-function backupAll(){
-  downloadFile(JSON.stringify(state,null,2),`trading-os-BACKUP-${todayStr()}.json`);
-  notify('Full backup downloaded.','success');
-}
+// backupAll defined above in export section
 
 /* ============================================================
    SECTION 20 — SETTINGS
@@ -2578,23 +2872,17 @@ function drawCalcCanvas(entry, sl, tp){
 }
 
 function sendCalcToTrade(){
+  // With live autofill this is now just a confirmation tap + tab switch
   if(_calcResults.entry){
-    // Capture values BEFORE switchTab resets the trade form
-    const entry    = _calcResults.entry;
-    const sl       = _calcResults.sl;
-    const tp       = _calcResults.tp;
-    const rr       = _calcResults.rr;
-    const riskPct  = document.getElementById('calc-risk-pct')?.value;
-    const pairType = document.getElementById('calc-pair-type')?.value;
-
-    // Switch tab first (this calls resetTradeForm internally)
+    autoFillNewTrade(
+      _calcResults.entry, _calcResults.sl, _calcResults.tp,
+      _calcResults.rr,
+      document.getElementById('calc-risk-pct')?.value,
+      document.getElementById('calc-pair-type')?.value
+    );
     switchTab('new-trade');
-
-    // THEN fill the freshly-reset form with calculator values
-    autoFillNewTrade(entry, sl, tp, rr, riskPct, pairType);
-
     notify(
-      `Switched to New Trade — Entry, SL${tp?', TP':''},  RR & Direction already filled ✓`,
+      `Switched to New Trade — Entry, SL${_calcResults.tp?', TP':''},  RR & Direction already filled ✓`,
       'success'
     );
   } else {
@@ -2927,8 +3215,21 @@ function weeklyNav(dir){
 
 function init(){
   loadState();applyTheme();initNav();initKeyboardShortcuts();
+  renderAccountSwitcher();
   renderDashboard();renderStrategyBuilder();renderPsychSliders();
-  resetTradeForm();loadSettingsForm();
+  resetTradeForm();loadSettingsForm();loadGoalsForm();
+
+  // Account manager
+  document.getElementById('btn-open-acct-manager')?.addEventListener('click', openAccountManager);
+  document.getElementById('btn-close-acct-manager')?.addEventListener('click', closeAccountManager);
+  document.getElementById('btn-add-account')?.addEventListener('click', ()=>{
+    const acct = makeDefaultAccount('New Account','#'+(Math.random()*0xffffff|0).toString(16).padStart(6,'0'));
+    root.accounts.push(acct);
+    saveState();
+    renderAccountManagerList();
+    renderAccountSwitcher();
+    notify(`Account "${acct.name}" created.`,'success');
+  });
 
   document.getElementById('btn-new-trade-quick').addEventListener('click',()=>{
     _editingTradeId=null;resetTradeForm();switchTab('new-trade');
@@ -3025,64 +3326,25 @@ function init(){
   document.getElementById('btn-save-settings').addEventListener('click',saveSettings);
   document.getElementById('btn-backup').addEventListener('click',backupAll);
   document.getElementById('btn-clear-all').addEventListener('click',async()=>{
-    if(!await confirm('Clear ALL data? This cannot be undone.'))return;
-    state={playbooks:DEFAULT_PLAYBOOKS,trades:[],transactions:[],dailyNotes:[],weeklyNotes:[],
-      settings:{...DEFAULT_SETTINGS},goals:{...DEFAULT_GOALS},mistakes:[...DEFAULT_MISTAKES],strengths:[...DEFAULT_STRENGTHS]};
+    if(!await confirm(`Clear ALL data for "${state.name}"? This cannot be undone.`))return;
+    const fresh = makeDefaultAccount(state.name, state.color);
+    fresh.id = state.id;
+    const idx = root.accounts.findIndex(a=>a.id===state.id);
+    if(idx>=0) root.accounts[idx]=fresh;
+    state=fresh;
+    root.activeAccountId=fresh.id;
     saveState();applyTheme();renderDashboard();renderStrategyBuilder();
-    resetTradeForm();loadSettingsForm();notify('All data cleared.','success');
+    resetTradeForm();loadSettingsForm();loadGoalsForm();notify('Account data cleared.','success');
   });
 
-  // ---- MOBILE DRAWER ----
-  (function initMobileDrawer(){
-    const drawer  = document.getElementById('mobile-nav');
-    const overlay = document.getElementById('drawer-overlay');
-    const menuBtn = document.getElementById('mob-menu-btn');
-    const closeBtn= document.getElementById('mob-drawer-close');
-    const tradeBtn= document.getElementById('mob-trade-btn');
-
-    function openDrawer(){
-      drawer?.classList.add('open');
-      // Force reflow so the opacity transition plays
-      if(overlay){ overlay.style.display='block'; requestAnimationFrame(()=>overlay.classList.add('active')); }
-      document.body.style.overflow='hidden'; // prevent background scroll
-    }
-    function closeDrawer(){
-      drawer?.classList.remove('open');
-      if(overlay){
-        overlay.classList.remove('active');
-        // Wait for fade-out before hiding
-        overlay.addEventListener('transitionend', ()=>{ overlay.style.display='none'; }, {once:true});
-      }
-      document.body.style.overflow='';
-    }
-
-    menuBtn ?.addEventListener('click', openDrawer);
-    closeBtn?.addEventListener('click', closeDrawer);
-    overlay ?.addEventListener('click', closeDrawer);
-
-    // Quick-trade button in header
-    tradeBtn?.addEventListener('click', ()=>{
-      closeDrawer();
-      _editingTradeId=null; resetTradeForm(); switchTab('new-trade');
+  // ---- MOBILE NAV ----
+  document.querySelectorAll('.mobile-nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      switchTab(item.dataset.tab);
+      document.querySelectorAll('.mobile-nav-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
     });
-
-    // Close drawer when any nav item is tapped
-    document.querySelectorAll('.mobile-nav-item').forEach(item => {
-      item.addEventListener('click', () => {
-        switchTab(item.dataset.tab);
-        document.querySelectorAll('.mobile-nav-item').forEach(i => i.classList.remove('active'));
-        item.classList.add('active');
-        closeDrawer();
-      });
-    });
-
-    // Swipe-to-close (touch drag left on drawer)
-    let touchStartX = 0;
-    drawer?.addEventListener('touchstart', e=>{ touchStartX = e.touches[0].clientX; }, {passive:true});
-    drawer?.addEventListener('touchend',   e=>{
-      if(e.changedTouches[0].clientX - touchStartX < -50) closeDrawer();
-    }, {passive:true});
-  })();
+  });
 
   // ---- RISK CALCULATOR — live auto-calc on every keystroke ----
   const calcFields = ['calc-balance','calc-risk-pct','calc-entry','calc-sl','calc-tp','calc-pip-value'];

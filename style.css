@@ -1,5 +1,5 @@
 /* ============================================================
-   TRADING OS v1.9.1 — style.css
+   TRADING OS v1.8.0 — style.css
    Mobile-first responsive design
    Breakpoints:
      --mob:  ≤ 600px  (phone portrait)
@@ -40,8 +40,7 @@ input, select, textarea { font: inherit; }
   --sidebar-w:   224px;
   --font-main:   'Inter', system-ui, -apple-system, sans-serif;
   --font-mono:   'JetBrains Mono', 'Fira Code', monospace;
-  --bottom-nav-h: 60px; /* legacy — kept for compat */
-  --mob-header-h: 56px; /* mobile top header height */
+  --bottom-nav-h: 60px; /* mobile bottom nav height */
 }
 
 /* ---------- DARK THEME ---------- */
@@ -191,148 +190,87 @@ body {
 .tab-section.active { display: block; }
 
 /* ============================================================
-   MOBILE TOP HEADER BAR
+   MOBILE BOTTOM NAV
    Hidden on desktop, shown on mobile
    ============================================================ */
-#mobile-header {
-  display: none; /* shown in mobile breakpoint */
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  height: var(--mob-header-h);
-  background: var(--sidebar-bg);
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  z-index: 400;
-  align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-}
-#mob-menu-btn {
-  background: none;
-  border: none;
-  color: #cbd5e1;
-  padding: 6px;
-  border-radius: 6px;
-  cursor: pointer;
-  flex-shrink: 0;
-  -webkit-tap-highlight-color: transparent;
-  transition: background var(--trans);
-}
-#mob-menu-btn:hover { background: rgba(255,255,255,.08); }
-.mob-hamburger { font-size: 22px; line-height: 1; display: block; }
-.mob-header-brand {
-  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
-}
-.logo-mark-sm {
-  width: 26px; height: 26px;
-  background: var(--accent);
-  border-radius: 5px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 800; color: #fff;
-  letter-spacing: -.02em; flex-shrink: 0;
-}
-.mob-header-title {
-  font-weight: 700; font-size: 15px; color: #fff;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-#mob-trade-btn {
-  flex-shrink: 0;
-  font-size: 12px !important;
-  padding: 6px 12px !important;
-}
-
-/* ============================================================
-   MOBILE DRAWER NAV
-   Hidden on desktop. Slides in from the left on mobile.
-   ============================================================ */
 #mobile-nav {
-  display: none; /* block on mobile */
+  display: none;
   position: fixed;
-  top: 0; left: 0; bottom: 0;
-  width: 272px;
-  max-width: calc(100vw - 56px); /* always leave a sliver to tap-close */
+  bottom: 0; left: 0; right: 0;
+  height: var(--bottom-nav-h);
   background: var(--sidebar-bg);
-  border-right: 1px solid rgba(255,255,255,.06);
-  z-index: 500;
-  overflow-y: auto;
-  overflow-x: hidden;
-  transform: translateX(-100%);
-  transition: transform .26s cubic-bezier(.4,0,.2,1);
+  border-top: 1px solid rgba(255,255,255,.08);
+  z-index: 300;
+  overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
+  /* Hide scrollbar */
   scrollbar-width: none;
 }
 #mobile-nav::-webkit-scrollbar { display: none; }
-#mobile-nav.open { transform: translateX(0); }
-
-/* Drawer header (logo + close btn) */
-#mobile-nav-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 14px 12px;
-  border-bottom: 1px solid rgba(255,255,255,.06);
-  flex-shrink: 0;
-}
-.mob-nav-brand { display: flex; align-items: center; gap: 9px; }
-#mob-drawer-close {
-  background: none; border: none;
-  color: rgba(255,255,255,.4); font-size: 18px;
-  padding: 4px 8px; border-radius: 5px; cursor: pointer;
-  transition: color var(--trans), background var(--trans);
-  -webkit-tap-highlight-color: transparent;
-}
-#mob-drawer-close:hover { color: #fff; background: rgba(255,255,255,.08); }
-
-/* Drawer nav list — vertical */
 #mobile-nav-list {
   display: flex;
-  flex-direction: column;
-  padding: 8px 8px 24px;
-  gap: 2px;
+  align-items: stretch;
+  height: 100%;
+  min-width: max-content;
+  padding: 0 4px;
 }
 .mobile-nav-item {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 14px;
   color: var(--sidebar-txt);
   cursor: pointer;
-  font-size: 13.5px;
+  font-size: 10px;
   font-weight: 500;
-  border-radius: 7px;
-  min-height: 44px;
+  border-radius: 8px;
+  min-width: 58px;
   transition: color var(--trans), background var(--trans);
   white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
 }
 .mobile-nav-item .mob-icon {
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
-  width: 20px;
-  text-align: center;
-  flex-shrink: 0;
-  opacity: .7;
 }
-.mobile-nav-item:hover { background: rgba(255,255,255,.06); color: #e2e8f0; }
 .mobile-nav-item.active {
-  background: var(--accent);
-  color: #fff;
+  color: var(--accent);
 }
-.mobile-nav-item.active .mob-icon { opacity: 1; }
+.mobile-nav-item.active .mob-icon {
+  /* accent dot under icon */
+  position: relative;
+}
+.mobile-nav-item.active .mob-icon::after {
+  content: '';
+  position: absolute;
+  bottom: -3px; left: 50%;
+  transform: translateX(-50%);
+  width: 4px; height: 4px;
+  background: var(--accent);
+  border-radius: 50%;
+}
 
-/* Drawer backdrop overlay */
-#drawer-overlay {
+/* FAB — floating New Trade button on mobile */
+#mob-fab {
   display: none;
   position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.45);
-  z-index: 490;
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-  opacity: 0;
-  transition: opacity .26s ease;
-}
-#drawer-overlay.active {
-  display: block;
-  opacity: 1;
+  bottom: calc(var(--bottom-nav-h) + 14px);
+  right: 16px;
+  width: 52px; height: 52px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 26px;
+  box-shadow: 0 4px 16px rgba(37,99,235,.45);
+  z-index: 290;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* ============================================================
@@ -359,13 +297,13 @@ body {
   /* Hide desktop sidebar entirely */
   #sidebar { display: none; }
 
-  /* Show mobile header + drawer nav */
-  #mobile-header { display: flex; }
-  #mobile-nav    { display: block; }
+  /* Show mobile bottom nav + FAB */
+  #mobile-nav { display: block; }
+  #mob-fab    { display: flex; }
 
-  /* Push content below the top header bar */
+  /* Push content above bottom nav */
   #main-content {
-    padding: calc(var(--mob-header-h) + 16px) 14px 24px;
+    padding: 16px 14px calc(var(--bottom-nav-h) + 16px);
   }
 
   /* Page headers */
@@ -488,8 +426,8 @@ body {
     padding: 20px 16px;
   }
 
-  /* Notifications: full width, below mobile header */
-  #notification-container { left: 10px; right: 10px; top: calc(var(--mob-header-h) + 8px); }
+  /* Notifications: full width */
+  #notification-container { left: 14px; right: 14px; top: 10px; }
   .notification { min-width: 0; max-width: 100%; font-size: 13px; }
 
   /* Calc results: 2 columns */
@@ -545,7 +483,7 @@ body {
 
 /* ---- Small phone (≤ 480px) ---- */
 @media (max-width: 480px) {
-  #main-content { padding: calc(var(--mob-header-h) + 12px) 10px 20px; }
+  #main-content { padding: 12px 10px calc(var(--bottom-nav-h) + 12px); }
 
   .page-title { font-size: 16px; }
 
@@ -1203,4 +1141,118 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
   background: var(--surface2); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 12px 14px;
   font-size: 13px; line-height: 1.6;
+}
+
+/* ============================================================
+   v2.0.0 — MULTI-ACCOUNT + DRAG REORDER
+   ============================================================ */
+
+/* ---- Account switcher in sidebar ---- */
+#account-switcher-wrap {
+  border-top: 1px solid rgba(255,255,255,.06);
+  padding-top: 10px;
+  margin-bottom: 10px;
+}
+.acct-switcher-label {
+  font-size: 9px; font-weight: 700;
+  letter-spacing: .1em; color: rgba(255,255,255,.25);
+  padding: 0 4px 6px;
+}
+#account-switcher { display: flex; flex-direction: column; gap: 2px; }
+.acct-switch-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-weight: 500;
+  color: var(--sidebar-txt);
+  transition: background var(--trans), color var(--trans);
+  -webkit-tap-highlight-color: transparent;
+}
+.acct-switch-item:hover  { background: rgba(255,255,255,.06); color: #e2e8f0; }
+.acct-switch-item.active { background: rgba(255,255,255,.10); color: #fff; }
+.acct-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%; flex-shrink: 0;
+}
+.acct-switch-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-active-tick { font-size: 11px; color: var(--accent); flex-shrink: 0; }
+
+/* ---- Account manager modal ---- */
+#acct-manager-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9995; backdrop-filter: blur(4px); padding: 16px;
+}
+#acct-manager-overlay.hidden { display: none; }
+#acct-manager-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 26px;
+  width: 100%; max-width: 520px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.3);
+  max-height: calc(100dvh - 60px); overflow-y: auto;
+}
+.acct-manager-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.acct-manager-row:last-child { border-bottom: none; }
+.acct-color-pick {
+  width: 32px; height: 32px; min-height: 32px;
+  padding: 2px; border-radius: 6px;
+  border: 1px solid var(--border); cursor: pointer;
+  flex-shrink: 0;
+}
+.acct-name-inp {
+  flex: 1; min-width: 140px;
+  font-size: 13px; font-weight: 500;
+}
+.acct-badge {
+  font-size: 11px; color: var(--text-muted);
+  background: var(--surface2); border: 1px solid var(--border);
+  padding: 2px 8px; border-radius: 99px; white-space: nowrap;
+}
+
+/* ---- Drag handles ---- */
+.drag-handle {
+  cursor: grab; color: var(--text-muted);
+  font-size: 16px; line-height: 1;
+  padding: 0 6px 0 2px; flex-shrink: 0;
+  opacity: .45;
+  transition: opacity var(--trans);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.drag-handle:hover { opacity: 1; color: var(--accent); }
+.drag-handle:active { cursor: grabbing; }
+.rule-drag-handle { font-size: 14px; }
+
+/* ---- Drag states ---- */
+.drag-ghost {
+  opacity: .35;
+  outline: 2px dashed var(--accent);
+  border-radius: var(--radius);
+}
+.drag-over-cat {
+  outline: 2px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+}
+.drag-over-rule {
+  outline: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+/* ---- Strategy rule row: accommodate drag handle ---- */
+.strategy-rule {
+  grid-template-columns: 20px 1fr 1fr auto auto 40px auto !important;
+}
+
+/* ---- Mobile: account switcher stacks ---- */
+@media (max-width: 768px) {
+  #account-switcher-wrap { display: none; } /* accessed via manage accounts in settings on mobile */
+  #acct-manager-box { padding: 18px 14px; }
+  .acct-manager-row { gap: 6px; }
+  .acct-name-inp { min-width: 100px; }
 }
